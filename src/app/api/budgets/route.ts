@@ -1,5 +1,5 @@
 import { getAuthUser } from "@/utils/supabase/auth";
-import { createAdminClient } from "@/utils/supabase/admin";
+import { getRequestDb } from "@/utils/supabase/db";
 import { getBudgetsData } from "@/lib/server/dashboardData";
 export const dynamic = "force-dynamic";
 
@@ -14,7 +14,7 @@ export async function GET() {
   if (!user) return unauthorized();
 
   try {
-    const data = await getBudgetsData(createAdminClient(), user.id);
+    const data = await getBudgetsData(await getRequestDb(), user.id);
     return Response.json(data);
   } catch (error) {
     console.error("[GET /api/budgets]", error);
@@ -40,7 +40,7 @@ export async function POST(req: Request) {
 
   if (!amount || amount <= 0) return new Response("Invalid amount", { status: 400 });
 
-  const db = createAdminClient();
+  const db = await getRequestDb();
 
   if (categoryId) {
     const { data: cat, error: catErr } = await db
@@ -87,7 +87,7 @@ export async function DELETE(req: Request) {
   const id = new URL(req.url).searchParams.get("id");
   if (!id) return new Response("id is required", { status: 400 });
 
-  const db = createAdminClient();
+  const db = await getRequestDb();
   const { error } = await db
     .from("budgets")
     .delete()

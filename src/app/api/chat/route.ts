@@ -1,4 +1,4 @@
-import { getAuthUser } from "@/utils/supabase/auth";
+import { getAuthSession } from "@/utils/supabase/db";
 import {
   getOrCreateSettings,
   effectiveModel,
@@ -10,8 +10,8 @@ import { runChat, type ChatBody } from "./chatHandler";
 export const dynamic = "force-dynamic";
 
 export async function POST(req: Request) {
-  const user = await getAuthUser();
-  if (!user) return new Response("Unauthorized", { status: 401 });
+  const { user, accessToken } = await getAuthSession();
+  if (!user || !accessToken) return new Response("Unauthorized", { status: 401 });
   const userId = user.id;
 
   let body: ChatBody;
@@ -50,5 +50,5 @@ export async function POST(req: Request) {
     }
   }
 
-  return createSSEStream((send) => runChat(userId, body, send, model));
+  return createSSEStream((send) => runChat(userId, accessToken, body, send, model));
 }

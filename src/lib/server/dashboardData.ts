@@ -1,13 +1,12 @@
-import { createAdminClient } from "@/utils/supabase/admin";
+import { type Db } from "@/utils/supabase/db";
 
 // ─── Shared dashboard data loaders ──────────────────────────────────────────────
 //
-// Each loader takes an admin client + userId and returns plain JSON. The
+// Each loader takes the request's user-scoped client + userId and returns plain JSON. The
 // individual API routes (/api/summary, /api/insights, /api/trends, /api/budgets)
 // delegate here, and /api/dashboard composes all of them behind a single auth
 // check so the dashboard costs one request instead of seven.
 
-type Db = ReturnType<typeof createAdminClient>;
 
 const pad = (n: number) => String(n).padStart(2, "0");
 

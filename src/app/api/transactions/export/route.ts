@@ -1,5 +1,5 @@
 import { getAuthUser } from "@/utils/supabase/auth";
-import { createAdminClient } from "@/utils/supabase/admin";
+import { getRequestDb } from "@/utils/supabase/db";
 export const dynamic = "force-dynamic";
 
 // Streams every transaction for the signed-in user as a CSV download.
@@ -18,7 +18,7 @@ export async function GET() {
   if (!user) return new Response("Unauthorized", { status: 401 });
   const userId = user.id;
 
-  const db = createAdminClient();
+  const db = await getRequestDb();
   const { data, error } = await db
     .from("transactions")
     .select("date, type, amount, description, categories(name)")

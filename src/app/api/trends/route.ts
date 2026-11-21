@@ -1,5 +1,5 @@
 import { getAuthUser } from "@/utils/supabase/auth";
-import { createAdminClient } from "@/utils/supabase/admin";
+import { getRequestDb } from "@/utils/supabase/db";
 import { getTrendsData } from "@/lib/server/dashboardData";
 export const dynamic = "force-dynamic";
 
@@ -14,7 +14,7 @@ export async function GET(req: Request) {
   const months = Number(searchParams.get("months") ?? 6);
 
   try {
-    const data = await getTrendsData(createAdminClient(), user.id, months);
+    const data = await getTrendsData(await getRequestDb(), user.id, months);
     return Response.json(data);
   } catch (error) {
     console.error("[GET /api/trends]", error);

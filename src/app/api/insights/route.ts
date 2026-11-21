@@ -1,5 +1,5 @@
 import { getAuthUser } from "@/utils/supabase/auth";
-import { createAdminClient } from "@/utils/supabase/admin";
+import { getRequestDb } from "@/utils/supabase/db";
 import { getInsightsData } from "@/lib/server/dashboardData";
 export const dynamic = "force-dynamic";
 
@@ -11,7 +11,7 @@ export async function GET() {
   if (!user) return new Response("Unauthorized", { status: 401 });
 
   try {
-    const data = await getInsightsData(createAdminClient(), user.id);
+    const data = await getInsightsData(await getRequestDb(), user.id);
     return Response.json(data);
   } catch (error) {
     console.error("[GET /api/insights]", error);

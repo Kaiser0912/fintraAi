@@ -1,5 +1,5 @@
 import { getAuthUser } from "@/utils/supabase/auth";
-import { createAdminClient } from "@/utils/supabase/admin";
+import { getRequestDb, type Db } from "@/utils/supabase/db";
 
 function parseDateParts(dateStr: string) {
   const [yearStr, monthStr, dayStr] = String(dateStr).split("T")[0].split("-");
@@ -11,7 +11,7 @@ function parseDateParts(dateStr: string) {
 }
 
 async function adjustMonthHistory(
-  db: ReturnType<typeof createAdminClient>,
+  db: Db,
   userId: string,
   day: number, month: number, year: number,
   type: "income" | "expense",
@@ -29,7 +29,7 @@ async function adjustMonthHistory(
 }
 
 async function adjustYearHistory(
-  db: ReturnType<typeof createAdminClient>,
+  db: Db,
   userId: string,
   month: number, year: number,
   type: "income" | "expense",
@@ -47,7 +47,7 @@ async function adjustYearHistory(
 }
 
 async function incrementMonthHistory(
-  db: ReturnType<typeof createAdminClient>,
+  db: Db,
   userId: string,
   day: number, month: number, year: number,
   type: "income" | "expense",
@@ -72,7 +72,7 @@ async function incrementMonthHistory(
 }
 
 async function incrementYearHistory(
-  db: ReturnType<typeof createAdminClient>,
+  db: Db,
   userId: string,
   month: number, year: number,
   type: "income" | "expense",
@@ -105,7 +105,7 @@ export async function DELETE(
   const userId = user.id;
 
   const { id: transactionId } = await context.params;
-  const db = createAdminClient();
+  const db = await getRequestDb();
 
   const { data: tx, error: fetchError } = await db
     .from("transactions").select("amount, type, date")
@@ -145,7 +145,7 @@ export async function PUT(
   catch { return new Response("Invalid JSON body", { status: 400 }); }
 
   const { amount, date, description, categoryId, type } = body;
-  const db = createAdminClient();
+  const db = await getRequestDb();
 
   const { data: oldTx, error: fetchError } = await db
     .from("transactions").select("amount, type, date")

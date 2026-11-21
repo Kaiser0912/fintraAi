@@ -1,5 +1,5 @@
 import { getAuthUser } from "@/utils/supabase/auth";
-import { createAdminClient } from "@/utils/supabase/admin";
+import { getRequestDb, type Db } from "@/utils/supabase/db";
 export const dynamic = "force-dynamic";
 
 // Bulk-import transactions from a CSV (the same shape /export produces).
@@ -76,7 +76,7 @@ export async function POST(req: Request) {
       { status: 400 }
     );
 
-  const db = createAdminClient();
+  const db = await getRequestDb();
 
   // Category name → id, per type (categories are global with a type column).
   const { data: cats, error: catErr } = await db
@@ -155,7 +155,6 @@ export async function POST(req: Request) {
   });
 }
 
-type Db = ReturnType<typeof createAdminClient>;
 
 async function applyHistoryDeltas(
   db: Db,

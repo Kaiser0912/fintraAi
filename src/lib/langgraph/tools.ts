@@ -1,13 +1,21 @@
 import { tool } from "@langchain/core/tools";
 import { RunnableConfig } from "@langchain/core/runnables";
 import { z } from "zod";
-import { createAdminClient } from "@/utils/supabase/admin";
+import { dbForToken, type Db } from "@/utils/supabase/db";
 import { hitlTools } from "./hitlTools";
 import { lastDueOnOrBefore, nextDueAfter, ordinal } from "@/lib/recurring";
 
 // ─── Internal types ────────────────────────────────────────────────────────────
 
-type DbClient = ReturnType<typeof createAdminClient>;
+type DbClient = Db;
+
+// Tools query as the signed-in user: runChat passes the access token in
+// configurable, so Row Level Security applies to every agent read and write.
+function dbFromConfig(config?: RunnableConfig): DbClient {
+  const token = (config as { configurable?: { accessToken?: string } } | undefined)?.configurable?.accessToken;
+  if (!token) throw new Error("Not signed in");
+  return dbForToken(token);
+}
 type TransactionType = "income" | "expense";
 
 // Shared param for read tools: "display" opts into the deterministic render
@@ -141,9 +149,9 @@ async function resolveCategoryId(
 export const getCategoriesToolDef = tool(
   async (
     { type }: { type?: "income" | "expense" | "all" },
-    _config?: RunnableConfig
+    config?: RunnableConfig
   ): Promise<string> => {
-    const db = createAdminClient();
+    const db = dbFromConfig(config);
     let query = db.from("categories").select("id, name, icon, type").order("name");
     if (type && type !== "all") query = (query as any).eq("type", type);
 
@@ -193,7 +201,7 @@ export const addTransactionsToolDef = tool(
     const userId = (config as any)?.configurable?.userId as string | undefined;
     if (!userId) return "Error: Not authenticated";
 
-    const db = createAdminClient();
+    const db = dbFromConfig(config);
     const messages: string[] = [];
     const errors: string[] = [];
 
@@ -282,7 +290,7 @@ export const listTransactionsToolDef = tool(
     const userId = (config as any)?.configurable?.userId as string | undefined;
     if (!userId) return "Error: Not authenticated";
 
-    const db = createAdminClient();
+    const db = dbFromConfig(config);
     let query = db
       .from("transactions")
       .select("id, date, type, amount, description, categories(id, name)")
@@ -364,7 +372,7 @@ export const editTransactionToolDef = tool(
     const userId = (config as any)?.configurable?.userId as string | undefined;
     if (!userId) return "Error: Not authenticated";
 
-    const db = createAdminClient();
+    const db = dbFromConfig(config);
 
     if (action === "delete") {
       const { data: tx, error: fetchErr } = await db
@@ -501,11 +509,11 @@ export const getReportToolDef = tool(
     const userId = (config as any)?.configurable?.userId as string | undefined;
     if (!userId) return "Error: Not authenticated";
 
-    if (scope !== "range") return getHistoryReport(userId, scope, year, month);
+    if (scope !== "range") return getHistoryReport(dbFromConfig(config), userId, scope, year, month);
     if (!startDate || !endDate)
       return "Error: startDate and endDate are required when scope is 'range'";
 
-    const db = createAdminClient();
+    const db = dbFromConfig(config);
     const { data: transactions, error } = await db
       .from("transactions")
       .select("type, amount, categories(name)")
@@ -579,14 +587,13 @@ export const getReportToolDef = tool(
 
 // History branch of get_report (daily/monthly rollups from the history tables).
 async function getHistoryReport(
+  db: DbClient,
   userId: string,
   scope: "month" | "year",
   year?: number,
   month?: number
 ): Promise<string> {
   if (!year) return "Error: year is required when scope is 'month' or 'year'";
-
-  const db = createAdminClient();
 
   if (scope === "month") {
       if (!month) return "Error: month is required when scope is 'month'";
@@ -687,12 +694,12 @@ export const budgetToolDef = tool(
     const userId = (config as any)?.configurable?.userId as string | undefined;
     if (!userId) return "Error: Not authenticated";
 
-    if (action === "status") return getBudgetStatusReport(userId);
+    if (action === "status") return getBudgetStatusReport(dbFromConfig(config), userId);
 
     if (!amount || amount <= 0)
       return "Error: amount must be greater than 0 when action is 'set'";
 
-    const db = createAdminClient();
+    const db = dbFromConfig(config);
 
     let categoryId: string | null = null;
     let label = "overall";
@@ -754,9 +761,8 @@ export const budgetToolDef = tool(
 );
 
 // Status branch of the budget tool.
-async function getBudgetStatusReport(userId: string): Promise<string> {
+async function getBudgetStatusReport(db: DbClient, userId: string): Promise<string> {
   {
-    const db = createAdminClient();
     const { start, end, label } = currentMonthBounds();
 
     const [{ data: budgets, error: bErr }, { data: txns, error: tErr }] =
@@ -846,7 +852,7 @@ export const createRecurringTransactionToolDef = tool(
     if (dayOfMonth < 1 || dayOfMonth > 28)
       return "Error: dayOfMonth must be between 1 and 28";
 
-    const db = createAdminClient();
+    const db = dbFromConfig(config);
     const category = await resolveCategoryId(db, categoryName, type);
     if (!category) {
       const { data: cats } = await db

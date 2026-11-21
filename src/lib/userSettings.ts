@@ -1,4 +1,4 @@
-import { createAdminClient } from "@/utils/supabase/admin";
+import { getRequestDb, type Db } from "@/utils/supabase/db";
 import { decryptSecret, encryptSecret } from "@/lib/crypto";
 import { DEFAULT_MODEL_CONFIG, type ModelProvider } from "@/lib/langgraph/types";
 import { FREE_CHAT_QUOTA, isValidModel } from "@/lib/aiModels";
@@ -26,7 +26,7 @@ function currentMonth(): string {
 export async function getOrCreateSettings(
   userId: string
 ): Promise<UserSettingsRow> {
-  const db = createAdminClient();
+  const db = await getRequestDb();
   // Insert a bare row if none exists; ignore the conflict if it does.
   await db
     .from("user_settings")
@@ -93,21 +93,13 @@ export function quotaStatus(row: UserSettingsRow): QuotaStatus {
   };
 }
 
-/** Charges one managed message. Resets the counter on a new month. */
-export async function consumeChatQuota(userId: string): Promise<void> {
-  const db = createAdminClient();
-  const month = currentMonth();
-  const { data } = await db
-    .from("user_settings")
-    .select("chat_quota_used, chat_quota_month")
-    .eq("user_id", userId)
-    .single();
-  const used =
-    data?.chat_quota_month === month ? data?.chat_quota_used ?? 0 : 0;
-  await db
-    .from("user_settings")
-    .update({ chat_quota_used: used + 1, chat_quota_month: month })
-    .eq("user_id", userId);
+/** Charges one managed message; the counter resets on a new month. Runs in the
+ *  database (consume_chat_quota) because users cannot write the quota columns.
+ *  Takes a token-bound client: it is called from inside the chat stream, after
+ *  the request's cookie scope has ended. */
+export async function consumeChatQuota(db: Db): Promise<void> {
+  const { error } = await db.rpc("consume_chat_quota");
+  if (error) console.error("[consumeChatQuota]", error.message);
 }
 
 // ─── BYO key mutations ────────────────────────────────────────────────────────
@@ -118,7 +110,7 @@ export async function setByoKey(
   modelName: string,
   apiKey: string
 ): Promise<void> {
-  const db = createAdminClient();
+  const db = await getRequestDb();
   await db.from("user_settings").upsert(
     {
       user_id: userId,
@@ -137,7 +129,7 @@ export async function setByoModel(
   userId: string,
   modelName: string
 ): Promise<void> {
-  const db = createAdminClient();
+  const db = await getRequestDb();
   await db
     .from("user_settings")
     .update({ model_name: modelName, updated_at: new Date().toISOString() })
@@ -145,7 +137,7 @@ export async function setByoModel(
 }
 
 export async function removeByoKey(userId: string): Promise<void> {
-  const db = createAdminClient();
+  const db = await getRequestDb();
   await db
     .from("user_settings")
     .update({
