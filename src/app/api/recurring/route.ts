@@ -1,5 +1,5 @@
 import { getAuthUser } from "@/utils/supabase/auth";
-import { createAdminClient } from "@/utils/supabase/admin";
+import { getRequestDb } from "@/utils/supabase/db";
 import { lastDueOnOrBefore } from "@/lib/recurring";
 export const dynamic = "force-dynamic";
 
@@ -13,7 +13,7 @@ export async function GET() {
   if (!user) return unauthorized();
   const userId = user.id;
 
-  const db = createAdminClient();
+  const db = await getRequestDb();
   const { data, error } = await db
     .from("recurring_rules")
     .select("id, amount, type, description, day_of_month, active, last_run_date, category_id, categories(id, name, icon)")
@@ -67,7 +67,7 @@ export async function POST(req: Request) {
   if (!dom || dom < 1 || dom > 28)
     return new Response("Day of month must be between 1 and 28", { status: 400 });
 
-  const db = createAdminClient();
+  const db = await getRequestDb();
 
   const { data: cat, error: catErr } = await db
     .from("categories")
@@ -129,7 +129,7 @@ export async function PATCH(req: Request) {
     update.last_run_date = lastDueOnOrBefore(new Date(), dom);
   }
 
-  const db = createAdminClient();
+  const db = await getRequestDb();
   const { error } = await db
     .from("recurring_rules")
     .update(update)
@@ -149,7 +149,7 @@ export async function DELETE(req: Request) {
   const id = new URL(req.url).searchParams.get("id");
   if (!id) return new Response("id is required", { status: 400 });
 
-  const db = createAdminClient();
+  const db = await getRequestDb();
   const { error } = await db
     .from("recurring_rules")
     .delete()

@@ -1,9 +1,8 @@
 import { getAuthUser } from "@/utils/supabase/auth";
-import { createAdminClient } from "@/utils/supabase/admin";
+import { getRequestDb, type Db } from "@/utils/supabase/db";
 import { lastDueOnOrBefore } from "@/lib/recurring";
 export const dynamic = "force-dynamic";
 
-type Db = ReturnType<typeof createAdminClient>;
 type TxType = "income" | "expense";
 
 function parts(dateStr: string) {
@@ -62,7 +61,7 @@ export async function POST() {
   if (!user) return new Response("Unauthorized", { status: 401 });
   const userId = user.id;
 
-  const db = createAdminClient();
+  const db = await getRequestDb();
   const today = new Date();
 
   const { data: rules, error } = await db

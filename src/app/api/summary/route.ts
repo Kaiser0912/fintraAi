@@ -1,5 +1,5 @@
 import { getAuthUser } from "@/utils/supabase/auth";
-import { createAdminClient } from "@/utils/supabase/admin";
+import { getRequestDb } from "@/utils/supabase/db";
 import { getSummaryData } from "@/lib/server/dashboardData";
 export const dynamic = "force-dynamic";
 
@@ -16,7 +16,7 @@ export async function GET(req: Request) {
   }
 
   try {
-    const data = await getSummaryData(createAdminClient(), user.id, startDate, endDate);
+    const data = await getSummaryData(await getRequestDb(), user.id, startDate, endDate);
     return Response.json(data);
   } catch (error) {
     console.error("[GET /api/summary]", error);

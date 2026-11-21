@@ -1,5 +1,5 @@
 import { getAuthUser } from "@/utils/supabase/auth";
-import { createAdminClient } from "@/utils/supabase/admin";
+import { getRequestDb } from "@/utils/supabase/db";
 
 export async function GET(req: Request) {
   const user = await getAuthUser();
@@ -10,7 +10,7 @@ export async function GET(req: Request) {
   const year = searchParams.get("year");
   if (!year) return new Response("valid year is required", { status: 400 });
 
-  const db = createAdminClient();
+  const db = await getRequestDb();
   const { data, error } = await db
     .from("year_history")
     .select("month, income, expense")

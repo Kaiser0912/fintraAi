@@ -1,9 +1,9 @@
-import { createAdminClient } from "@/utils/supabase/admin";
+import { getRequestDb } from "@/utils/supabase/db";
 
 export async function GET() {
   try {
-    const db = createAdminClient();
-    const { error } = await db.from("users").select("id").limit(1);
+    const db = await getRequestDb();
+    const { error } = await db.from("categories").select("id").limit(1);
     if (error) throw error;
     return Response.json({ status: "ok" });
   } catch (err) {

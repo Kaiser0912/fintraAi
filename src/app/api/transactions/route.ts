@@ -1,5 +1,5 @@
 import { getAuthUser } from "@/utils/supabase/auth";
-import { createAdminClient } from "@/utils/supabase/admin";
+import { getRequestDb, type Db } from "@/utils/supabase/db";
 export const dynamic = "force-dynamic";
 
 function unauthorized() {
@@ -16,7 +16,7 @@ function parseDateParts(dateStr: string) {
 }
 
 async function incrementMonthHistory(
-  db: ReturnType<typeof createAdminClient>,
+  db: Db,
   userId: string,
   day: number, month: number, year: number,
   type: "income" | "expense",
@@ -43,7 +43,7 @@ async function incrementMonthHistory(
 }
 
 async function incrementYearHistory(
-  db: ReturnType<typeof createAdminClient>,
+  db: Db,
   userId: string,
   month: number, year: number,
   type: "income" | "expense",
@@ -84,7 +84,7 @@ export async function POST(req: Request) {
   if (!categoryId) return new Response("Category ID is required", { status: 400 });
   if (!["income", "expense"].includes(type)) return new Response("Invalid transaction type", { status: 400 });
 
-  const db = createAdminClient();
+  const db = await getRequestDb();
 
   const { data: category, error: catError } = await db
     .from("categories").select("type").eq("id", categoryId).single();
@@ -124,7 +124,7 @@ export async function GET(req: Request) {
   const search = searchParams.get("search");
   const offset = (page - 1) * limit;
 
-  const db = createAdminClient();
+  const db = await getRequestDb();
 
   let query = db
     .from("transactions")

@@ -30,3 +30,20 @@ INSERT INTO public.categories (id, name, icon, type) VALUES
 ('f4d68c3d-c768-4ac8-ae5a-78c76ade6ac6', 'Other Income', '💰', 'income'),
 ('93c78a92-9050-4fe4-b27e-de3f13ff64cd', 'Salary', '💼', 'income')
 ON CONFLICT DO NOTHING;
+
+-- Local-only test login (never runs on prod; seed.sql is used by local resets).
+--   email: test@fintra.local   password: fintra-local-test
+INSERT INTO auth.users (instance_id, id, aud, role, email, encrypted_password,
+  email_confirmed_at, raw_app_meta_data, raw_user_meta_data, created_at, updated_at,
+  confirmation_token, email_change, email_change_token_new, recovery_token)
+VALUES ('00000000-0000-0000-0000-000000000000', '11111111-1111-4111-8111-111111111111',
+  'authenticated', 'authenticated', 'test@fintra.local',
+  extensions.crypt('fintra-local-test', extensions.gen_salt('bf')),
+  now(), '{"provider":"email","providers":["email"]}', '{}', now(), now(), '', '', '', '')
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO auth.identities (id, user_id, provider_id, identity_data, provider, last_sign_in_at, created_at, updated_at)
+VALUES (gen_random_uuid(), '11111111-1111-4111-8111-111111111111', '11111111-1111-4111-8111-111111111111',
+  '{"sub":"11111111-1111-4111-8111-111111111111","email":"test@fintra.local","email_verified":true}',
+  'email', now(), now(), now())
+ON CONFLICT DO NOTHING;

@@ -1,5 +1,5 @@
 import { getAuthUser } from "@/utils/supabase/auth";
-import { createAdminClient } from "@/utils/supabase/admin";
+import { getRequestDb } from "@/utils/supabase/db";
 import {
   getSummaryData,
   getInsightsData,
@@ -22,7 +22,7 @@ export async function GET() {
   const start = new Date(now.getFullYear(), now.getMonth(), 1);
   const end = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
 
-  const db = createAdminClient();
+  const db = await getRequestDb();
 
   try {
     const [summary, insights, trends, budgets, recent] = await Promise.all([

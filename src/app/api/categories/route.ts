@@ -1,4 +1,4 @@
-import { createAdminClient } from "@/utils/supabase/admin";
+import { getRequestDb } from "@/utils/supabase/db";
 export const dynamic = "force-dynamic";
 
 export async function GET(req: Request) {
@@ -9,7 +9,7 @@ export async function GET(req: Request) {
     return new Response("Invalid category type", { status: 400 });
   }
 
-  const supabase = createAdminClient();
+  const supabase = await getRequestDb();
   let query = supabase.from("categories").select("id, name, icon").order("name");
   if (type) query = query.eq("type", type);
 

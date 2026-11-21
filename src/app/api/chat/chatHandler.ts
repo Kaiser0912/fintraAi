@@ -1,7 +1,7 @@
 import { HumanMessage, AIMessage, SystemMessage } from "@langchain/core/messages";
 import { Command } from "@langchain/langgraph";
 import { fintraGraph, buildSystemPrompt, messageText } from "@/lib/langgraph/graph";
-import { createAdminClient } from "@/utils/supabase/admin";
+import { dbForToken, type Db } from "@/utils/supabase/db";
 import { calculateCost } from "@/lib/langgraph/types";
 import { summarizeHistory } from "@/lib/langgraph/summarize";
 import { suggestFollowUps } from "@/lib/langgraph/suggest";
@@ -40,9 +40,8 @@ export interface ChatBody {
 
 // ─── Category summary used in system prompt ────────────────────────────────────
 
-async function buildCategorySummary(): Promise<string> {
+async function buildCategorySummary(db: Db): Promise<string> {
   try {
-    const db = createAdminClient();
     const { data } = await db
       .from("categories")
       .select("name, type")
@@ -65,13 +64,13 @@ async function buildCategorySummary(): Promise<string> {
 // Both branches (Command + initial state) are valid inputs at runtime.
 type GraphInput = Parameters<typeof fintraGraph.streamEvents>[0];
 
-async function buildGraphInput(body: ChatBody): Promise<GraphInput> {
+async function buildGraphInput(body: ChatBody, db: Db): Promise<GraphInput> {
   if (body.resume) {
     return new Command({ resume: body.resume }) as unknown as GraphInput;
   }
 
   const today = new Date().toISOString().split("T")[0];
-  const categorySummary = await buildCategorySummary();
+  const categorySummary = await buildCategorySummary(db);
 
   const messages = (body.messages ?? []).map((m) =>
     m.role === "user" ? new HumanMessage(m.content) : new AIMessage(m.content)
@@ -98,12 +97,15 @@ async function buildGraphInput(body: ChatBody): Promise<GraphInput> {
 
 export async function runChat(
   userId: string,
+  accessToken: string,
   body: ChatBody,
   send: (event: SSEEvent) => void,
   model: EffectiveModel
 ): Promise<void> {
   const today = new Date().toISOString().split("T")[0];
-  const input = await buildGraphInput(body);
+  // Every query in this turn runs as the user (RLS), via their access token.
+  const db = dbForToken(accessToken);
+  const input = await buildGraphInput(body, db);
 
   let totalInputTokens = 0;
   let totalOutputTokens = 0;
@@ -129,6 +131,7 @@ export async function runChat(
     configurable: {
       thread_id: body.threadId,
       userId,
+      accessToken,
       today,
       modelProvider: model.provider,
       modelName: model.modelName,
@@ -229,7 +232,7 @@ export async function runChat(
   // before any call doesn't burn quota. Best-effort — never break the turn.
   if (model.managed && !body.resume && body.messages) {
     try {
-      await consumeChatQuota(userId);
+      await consumeChatQuota(db);
     } catch (err) {
       console.error("[chat] quota consume failed", err);
     }
