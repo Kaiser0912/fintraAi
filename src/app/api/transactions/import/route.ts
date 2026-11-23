@@ -1,5 +1,5 @@
 import { getAuthUser } from "@/utils/supabase/auth";
-import { getRequestDb, type Db } from "@/utils/supabase/db";
+import { getRequestDb } from "@/utils/supabase/db";
 export const dynamic = "force-dynamic";
 
 // Bulk-import transactions from a CSV (the same shape /export produces).
@@ -144,10 +144,6 @@ export async function POST(req: Request) {
     return new Response(`DB Error: ${insErr.message}`, { status: 500 });
   }
 
-  // Roll the aggregated deltas into month_history + year_history so the trend
-  // chart and history views reflect the import.
-  await applyHistoryDeltas(db, userId, prepared);
-
   return Response.json({
     imported: prepared.length,
     skipped: errors.length,
@@ -155,62 +151,3 @@ export async function POST(req: Request) {
   });
 }
 
-
-async function applyHistoryDeltas(
-  db: Db,
-  userId: string,
-  rows: { day: number; month: number; year: number; type: "income" | "expense"; amount: number }[]
-) {
-  const monthMap = new Map<string, { day: number; month: number; year: number; income: number; expense: number }>();
-  const yearMap = new Map<string, { month: number; year: number; income: number; expense: number }>();
-
-  for (const r of rows) {
-    const mk = `${r.day}|${r.month}|${r.year}`;
-    const mEntry = monthMap.get(mk) ?? { day: r.day, month: r.month, year: r.year, income: 0, expense: 0 };
-    mEntry[r.type] += r.amount;
-    monthMap.set(mk, mEntry);
-
-    const yk = `${r.month}|${r.year}`;
-    const yEntry = yearMap.get(yk) ?? { month: r.month, year: r.year, income: 0, expense: 0 };
-    yEntry[r.type] += r.amount;
-    yearMap.set(yk, yEntry);
-  }
-
-  for (const e of monthMap.values()) {
-    const { data: existing } = await db
-      .from("month_history")
-      .select("id, income, expense")
-      .eq("user_id", userId).eq("day", e.day).eq("month", e.month).eq("year", e.year)
-      .maybeSingle();
-    if (existing) {
-      await db.from("month_history").update({
-        income: Number(existing.income) + e.income,
-        expense: Number(existing.expense) + e.expense,
-      }).eq("id", existing.id);
-    } else {
-      await db.from("month_history").insert({
-        user_id: userId, day: e.day, month: e.month, year: e.year,
-        income: e.income, expense: e.expense,
-      });
-    }
-  }
-
-  for (const e of yearMap.values()) {
-    const { data: existing } = await db
-      .from("year_history")
-      .select("id, income, expense")
-      .eq("user_id", userId).eq("month", e.month).eq("year", e.year)
-      .maybeSingle();
-    if (existing) {
-      await db.from("year_history").update({
-        income: Number(existing.income) + e.income,
-        expense: Number(existing.expense) + e.expense,
-      }).eq("id", existing.id);
-    } else {
-      await db.from("year_history").insert({
-        user_id: userId, month: e.month, year: e.year,
-        income: e.income, expense: e.expense,
-      });
-    }
-  }
-}

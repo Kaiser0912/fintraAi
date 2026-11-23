@@ -4,7 +4,6 @@ import { z } from "zod";
 import { dbForToken, type Db } from "@/utils/supabase/db";
 import { hitlTools } from "./hitlTools";
 import { lastDueOnOrBefore, nextDueAfter, ordinal } from "@/lib/recurring";
-import { countsInTotals } from "@/lib/ledger";
 
 // ─── Internal types ────────────────────────────────────────────────────────────
 
@@ -28,100 +27,6 @@ const purposeParam = z
   .describe(
     "'display' when the user just wants to see this data (the app renders it as a table automatically and your turn ends); 'lookup' when you need the data for analysis, advice, or a follow-up action"
   );
-
-// ─── Shared DB helpers (mirrors logic in existing API routes) ──────────────────
-
-function parseDateParts(dateStr: string) {
-  const [y, m, d] = String(dateStr).split("T")[0].split("-");
-  return { day: parseInt(d, 10), month: parseInt(m, 10), year: parseInt(y, 10) };
-}
-
-async function upsertMonthHistory(
-  db: DbClient,
-  userId: string,
-  day: number,
-  month: number,
-  year: number,
-  type: string,
-  delta: number
-) {
-  if (!countsInTotals(type)) return; // transfers never touch history
-  const { data: row } = await db
-    .from("month_history")
-    .select("id, income, expense")
-    .eq("user_id", userId)
-    .eq("day", day)
-    .eq("month", month)
-    .eq("year", year)
-    .maybeSingle();
-
-  if (row) {
-    await db
-      .from("month_history")
-      .update({
-        income:
-          type === "income"
-            ? Math.max(0, Number(row.income) + delta)
-            : Number(row.income),
-        expense:
-          type === "expense"
-            ? Math.max(0, Number(row.expense) + delta)
-            : Number(row.expense),
-      })
-      .eq("id", row.id);
-  } else if (delta > 0) {
-    await db.from("month_history").insert({
-      user_id: userId,
-      day,
-      month,
-      year,
-      income: type === "income" ? delta : 0,
-      expense: type === "expense" ? delta : 0,
-    });
-  }
-}
-
-async function upsertYearHistory(
-  db: DbClient,
-  userId: string,
-  month: number,
-  year: number,
-  type: string,
-  delta: number
-) {
-  if (!countsInTotals(type)) return; // transfers never touch history
-  const { data: row } = await db
-    .from("year_history")
-    .select("id, income, expense")
-    .eq("user_id", userId)
-    .eq("month", month)
-    .eq("year", year)
-    .maybeSingle();
-
-  if (row) {
-    await db
-      .from("year_history")
-      .update({
-        income:
-          type === "income"
-            ? Math.max(0, Number(row.income) + delta)
-            : Number(row.income),
-        expense:
-          type === "expense"
-            ? Math.max(0, Number(row.expense) + delta)
-            : Number(row.expense),
-      })
-      .eq("id", row.id);
-  } else if (delta > 0) {
-    await db.from("year_history").insert({
-      user_id: userId,
-      month,
-      year,
-      income: type === "income" ? delta : 0,
-      expense: type === "expense" ? delta : 0,
-    });
-  }
-}
 
 // ─── Category resolver ─────────────────────────────────────────────────────────
 
@@ -240,12 +145,6 @@ export const addTransactionsToolDef = tool(
         errors.push(`₹${tx.amount} ${category.name}: ${error.message}`);
         continue;
       }
-
-      const { day, month, year } = parseDateParts(tx.date);
-      await Promise.all([
-        upsertMonthHistory(db, userId, day, month, year, tx.type, tx.amount),
-        upsertYearHistory(db, userId, month, year, tx.type, tx.amount),
-      ]);
 
       messages.push(
         `Added ${tx.type} of ₹${tx.amount} in ${category.name} on ${tx.date}${tx.description ? ` — "${tx.description}"` : ""}`
@@ -397,12 +296,6 @@ export const editTransactionToolDef = tool(
 
       if (deleteErr) return `Error: ${deleteErr.message}`;
 
-      const { day, month, year } = parseDateParts(tx.date);
-      await Promise.all([
-        upsertMonthHistory(db, userId, day, month, year, tx.type as TransactionType, -Number(tx.amount)),
-        upsertYearHistory(db, userId, month, year, tx.type as TransactionType, -Number(tx.amount)),
-      ]);
-
       const catName =
         tx.categories && !Array.isArray(tx.categories)
           ? (tx.categories as any).name
@@ -436,13 +329,6 @@ export const editTransactionToolDef = tool(
       newCategoryId = cat.id;
     }
 
-    // Roll back old history
-    const oldParts = parseDateParts(old.date);
-    await Promise.all([
-      upsertMonthHistory(db, userId, oldParts.day, oldParts.month, oldParts.year, old.type as TransactionType, -Number(old.amount)),
-      upsertYearHistory(db, userId, oldParts.month, oldParts.year, old.type as TransactionType, -Number(old.amount)),
-    ]);
-
     const { error: updateErr } = await db
       .from("transactions")
       .update({
@@ -458,20 +344,8 @@ export const editTransactionToolDef = tool(
       .eq("user_id", userId);
 
     if (updateErr) {
-      // Restore history on failure
-      await Promise.all([
-        upsertMonthHistory(db, userId, oldParts.day, oldParts.month, oldParts.year, old.type as TransactionType, Number(old.amount)),
-        upsertYearHistory(db, userId, oldParts.month, oldParts.year, old.type as TransactionType, Number(old.amount)),
-      ]);
       return `Error: ${updateErr.message}`;
     }
-
-    // Apply new history
-    const newParts = parseDateParts(newDate);
-    await Promise.all([
-      upsertMonthHistory(db, userId, newParts.day, newParts.month, newParts.year, newType, newAmount),
-      upsertYearHistory(db, userId, newParts.month, newParts.year, newType, newAmount),
-    ]);
 
     return JSON.stringify({ success: true, message: "Transaction updated successfully" });
   },

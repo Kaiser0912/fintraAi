@@ -1,75 +1,9 @@
 import { getAuthUser } from "@/utils/supabase/auth";
-import { getRequestDb, type Db } from "@/utils/supabase/db";
-import { countsInTotals } from "@/lib/ledger";
+import { getRequestDb } from "@/utils/supabase/db";
 export const dynamic = "force-dynamic";
 
 function unauthorized() {
   return new Response("Unauthorized", { status: 401 });
-}
-
-function parseDateParts(dateStr: string) {
-  const [yearStr, monthStr, dayStr] = String(dateStr).split("T")[0].split("-");
-  return {
-    day: parseInt(dayStr, 10),
-    month: parseInt(monthStr, 10),
-    year: parseInt(yearStr, 10),
-  };
-}
-
-async function incrementMonthHistory(
-  db: Db,
-  userId: string,
-  day: number, month: number, year: number,
-  type: string,
-  amount: number
-) {
-  if (!countsInTotals(type)) return; // transfers never touch history
-  const { data: existing } = await db
-    .from("month_history")
-    .select("id, income, expense")
-    .eq("user_id", userId).eq("day", day).eq("month", month).eq("year", year)
-    .maybeSingle();
-
-  if (existing) {
-    await db.from("month_history").update({
-      income: type === "income" ? Number(existing.income) + amount : Number(existing.income),
-      expense: type === "expense" ? Number(existing.expense) + amount : Number(existing.expense),
-    }).eq("id", existing.id);
-  } else {
-    await db.from("month_history").insert({
-      user_id: userId, day, month, year,
-      income: type === "income" ? amount : 0,
-      expense: type === "expense" ? amount : 0,
-    });
-  }
-}
-
-async function incrementYearHistory(
-  db: Db,
-  userId: string,
-  month: number, year: number,
-  type: string,
-  amount: number
-) {
-  if (!countsInTotals(type)) return; // transfers never touch history
-  const { data: existing } = await db
-    .from("year_history")
-    .select("id, income, expense")
-    .eq("user_id", userId).eq("month", month).eq("year", year)
-    .maybeSingle();
-
-  if (existing) {
-    await db.from("year_history").update({
-      income: type === "income" ? Number(existing.income) + amount : Number(existing.income),
-      expense: type === "expense" ? Number(existing.expense) + amount : Number(existing.expense),
-    }).eq("id", existing.id);
-  } else {
-    await db.from("year_history").insert({
-      user_id: userId, month, year,
-      income: type === "income" ? amount : 0,
-      expense: type === "expense" ? amount : 0,
-    });
-  }
 }
 
 export async function POST(req: Request) {
@@ -104,10 +38,6 @@ export async function POST(req: Request) {
     console.error("[POST /api/transactions]", txError);
     return new Response(`DB Error: ${txError.message}`, { status: 500 });
   }
-
-  const { day, month, year } = parseDateParts(date);
-  await incrementMonthHistory(db, userId, day, month, year, type, Number(amount));
-  await incrementYearHistory(db, userId, month, year, type, Number(amount));
 
   return Response.json(transaction, { status: 201 });
 }

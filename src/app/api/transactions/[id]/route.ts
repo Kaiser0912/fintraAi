@@ -1,105 +1,5 @@
 import { getAuthUser } from "@/utils/supabase/auth";
-import { getRequestDb, type Db } from "@/utils/supabase/db";
-import { countsInTotals } from "@/lib/ledger";
-
-function parseDateParts(dateStr: string) {
-  const [yearStr, monthStr, dayStr] = String(dateStr).split("T")[0].split("-");
-  return {
-    day: parseInt(dayStr, 10),
-    month: parseInt(monthStr, 10),
-    year: parseInt(yearStr, 10),
-  };
-}
-
-async function adjustMonthHistory(
-  db: Db,
-  userId: string,
-  day: number, month: number, year: number,
-  type: string,
-  delta: number
-) {
-  if (!countsInTotals(type)) return; // transfers never touch history
-  const { data: existing } = await db
-    .from("month_history").select("id, income, expense")
-    .eq("user_id", userId).eq("day", day).eq("month", month).eq("year", year)
-    .maybeSingle();
-  if (!existing) return;
-  await db.from("month_history").update({
-    income: type === "income" ? Math.max(0, Number(existing.income) + delta) : Number(existing.income),
-    expense: type === "expense" ? Math.max(0, Number(existing.expense) + delta) : Number(existing.expense),
-  }).eq("id", existing.id);
-}
-
-async function adjustYearHistory(
-  db: Db,
-  userId: string,
-  month: number, year: number,
-  type: string,
-  delta: number
-) {
-  if (!countsInTotals(type)) return; // transfers never touch history
-  const { data: existing } = await db
-    .from("year_history").select("id, income, expense")
-    .eq("user_id", userId).eq("month", month).eq("year", year)
-    .maybeSingle();
-  if (!existing) return;
-  await db.from("year_history").update({
-    income: type === "income" ? Math.max(0, Number(existing.income) + delta) : Number(existing.income),
-    expense: type === "expense" ? Math.max(0, Number(existing.expense) + delta) : Number(existing.expense),
-  }).eq("id", existing.id);
-}
-
-async function incrementMonthHistory(
-  db: Db,
-  userId: string,
-  day: number, month: number, year: number,
-  type: string,
-  amount: number
-) {
-  if (!countsInTotals(type)) return; // transfers never touch history
-  const { data: existing } = await db
-    .from("month_history").select("id, income, expense")
-    .eq("user_id", userId).eq("day", day).eq("month", month).eq("year", year)
-    .maybeSingle();
-  if (existing) {
-    await db.from("month_history").update({
-      income: type === "income" ? Number(existing.income) + amount : Number(existing.income),
-      expense: type === "expense" ? Number(existing.expense) + amount : Number(existing.expense),
-    }).eq("id", existing.id);
-  } else {
-    await db.from("month_history").insert({
-      user_id: userId, day, month, year,
-      income: type === "income" ? amount : 0,
-      expense: type === "expense" ? amount : 0,
-    });
-  }
-}
-
-async function incrementYearHistory(
-  db: Db,
-  userId: string,
-  month: number, year: number,
-  type: string,
-  amount: number
-) {
-  if (!countsInTotals(type)) return; // transfers never touch history
-  const { data: existing } = await db
-    .from("year_history").select("id, income, expense")
-    .eq("user_id", userId).eq("month", month).eq("year", year)
-    .maybeSingle();
-  if (existing) {
-    await db.from("year_history").update({
-      income: type === "income" ? Number(existing.income) + amount : Number(existing.income),
-      expense: type === "expense" ? Number(existing.expense) + amount : Number(existing.expense),
-    }).eq("id", existing.id);
-  } else {
-    await db.from("year_history").insert({
-      user_id: userId, month, year,
-      income: type === "income" ? amount : 0,
-      expense: type === "expense" ? amount : 0,
-    });
-  }
-}
+import { getRequestDb } from "@/utils/supabase/db";
 
 export async function DELETE(
   req: Request,
@@ -113,13 +13,10 @@ export async function DELETE(
   const db = await getRequestDb();
 
   const { data: tx, error: fetchError } = await db
-    .from("transactions").select("amount, type, date")
+    .from("transactions").select("id")
     .eq("id", transactionId).eq("user_id", userId).single();
 
   if (fetchError || !tx) return new Response("Transaction not found", { status: 404 });
-
-  const amount = Number(tx.amount);
-  const { day, month, year } = parseDateParts(tx.date);
 
   const { error: deleteError } = await db
     .from("transactions").delete().eq("id", transactionId).eq("user_id", userId);
@@ -128,9 +25,6 @@ export async function DELETE(
     console.error("[DELETE /api/transactions/:id]", deleteError);
     return new Response(`DB Error: ${deleteError.message}`, { status: 500 });
   }
-
-  await adjustMonthHistory(db, userId, day, month, year, tx.type, -amount);
-  await adjustYearHistory(db, userId, month, year, tx.type, -amount);
 
   return new Response(null, { status: 204 });
 }
@@ -153,16 +47,10 @@ export async function PUT(
   const db = await getRequestDb();
 
   const { data: oldTx, error: fetchError } = await db
-    .from("transactions").select("amount, type, date")
+    .from("transactions").select("id")
     .eq("id", transactionId).eq("user_id", userId).single();
 
   if (fetchError || !oldTx) return new Response("Transaction not found", { status: 404 });
-
-  const oldAmount = Number(oldTx.amount);
-  const { day: oldDay, month: oldMonth, year: oldYear } = parseDateParts(oldTx.date);
-
-  await adjustMonthHistory(db, userId, oldDay, oldMonth, oldYear, oldTx.type, -oldAmount);
-  await adjustYearHistory(db, userId, oldMonth, oldYear, oldTx.type, -oldAmount);
 
   const { error: updateError } = await db
     .from("transactions")
@@ -173,10 +61,6 @@ export async function PUT(
     console.error("[PUT /api/transactions/:id]", updateError);
     return new Response(`DB Error: ${updateError.message}`, { status: 500 });
   }
-
-  const { day, month, year } = parseDateParts(date);
-  await incrementMonthHistory(db, userId, day, month, year, type, Number(amount));
-  await incrementYearHistory(db, userId, month, year, type, Number(amount));
 
   return new Response("Transaction updated", { status: 200 });
 }
