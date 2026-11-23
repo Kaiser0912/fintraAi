@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Loader2, Eye, EyeOff, Mail, CheckCircle2 } from "lucide-react";
 import { createClient } from "@/utils/supabase/client";
+import { isNativeApp, NATIVE_AUTH_CALLBACK, openInSystemBrowser } from "@/lib/native";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -100,6 +101,26 @@ export function AuthForm({ mode }: { mode: Mode }) {
   async function handleGoogle() {
     setError(null);
     setGoogleLoading(true);
+
+    // Inside the Android app Google refuses to sign in within the WebView, so
+    // open its page in Chrome and come back through a deep link. The PKCE
+    // verifier cookie is set here in the app's WebView, so the code exchange
+    // later succeeds when NativeAuthBridge loads /auth/callback in the app.
+    if (isNativeApp()) {
+      const { data, error } = await supabase.auth.signInWithOAuth({
+        provider: "google",
+        options: { redirectTo: NATIVE_AUTH_CALLBACK, skipBrowserRedirect: true },
+      });
+      if (error || !data?.url) {
+        setError(error?.message ?? "Could not start Google sign-in");
+        setGoogleLoading(false);
+        return;
+      }
+      await openInSystemBrowser(data.url);
+      setGoogleLoading(false);
+      return;
+    }
+
     const { error } = await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {
