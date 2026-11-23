@@ -1,58 +1,9 @@
 import { getAuthUser } from "@/utils/supabase/auth";
-import { getRequestDb, type Db } from "@/utils/supabase/db";
+import { getRequestDb } from "@/utils/supabase/db";
 import { lastDueOnOrBefore } from "@/lib/recurring";
 export const dynamic = "force-dynamic";
 
 type TxType = "income" | "expense";
-
-function parts(dateStr: string) {
-  const [y, m, d] = dateStr.split("-").map(Number);
-  return { year: y, month: m, day: d };
-}
-
-async function incMonthHistory(
-  db: Db, userId: string, day: number, month: number, year: number, type: TxType, amount: number
-) {
-  const { data: row } = await db
-    .from("month_history")
-    .select("id, income, expense")
-    .eq("user_id", userId).eq("day", day).eq("month", month).eq("year", year)
-    .maybeSingle();
-  if (row) {
-    await db.from("month_history").update({
-      income: type === "income" ? Number(row.income) + amount : Number(row.income),
-      expense: type === "expense" ? Number(row.expense) + amount : Number(row.expense),
-    }).eq("id", row.id);
-  } else {
-    await db.from("month_history").insert({
-      user_id: userId, day, month, year,
-      income: type === "income" ? amount : 0,
-      expense: type === "expense" ? amount : 0,
-    });
-  }
-}
-
-async function incYearHistory(
-  db: Db, userId: string, month: number, year: number, type: TxType, amount: number
-) {
-  const { data: row } = await db
-    .from("year_history")
-    .select("id, income, expense")
-    .eq("user_id", userId).eq("month", month).eq("year", year)
-    .maybeSingle();
-  if (row) {
-    await db.from("year_history").update({
-      income: type === "income" ? Number(row.income) + amount : Number(row.income),
-      expense: type === "expense" ? Number(row.expense) + amount : Number(row.expense),
-    }).eq("id", row.id);
-  } else {
-    await db.from("year_history").insert({
-      user_id: userId, month, year,
-      income: type === "income" ? amount : 0,
-      expense: type === "expense" ? amount : 0,
-    });
-  }
-}
 
 // POST — materialize any due recurring rules into real transactions.
 // Idempotent: a rule only posts once per period, guarded by last_run_date.
@@ -97,10 +48,6 @@ export async function POST() {
       console.error("[recurring materialize]", txErr);
       continue;
     }
-
-    const { day, month, year } = parts(due);
-    await incMonthHistory(db, userId, day, month, year, type, amount);
-    await incYearHistory(db, userId, month, year, type, amount);
 
     await db
       .from("recurring_rules")
