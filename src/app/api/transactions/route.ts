@@ -1,5 +1,6 @@
 import { getAuthUser } from "@/utils/supabase/auth";
 import { getRequestDb, type Db } from "@/utils/supabase/db";
+import { countsInTotals } from "@/lib/ledger";
 export const dynamic = "force-dynamic";
 
 function unauthorized() {
@@ -19,9 +20,10 @@ async function incrementMonthHistory(
   db: Db,
   userId: string,
   day: number, month: number, year: number,
-  type: "income" | "expense",
+  type: string,
   amount: number
 ) {
+  if (!countsInTotals(type)) return; // transfers never touch history
   const { data: existing } = await db
     .from("month_history")
     .select("id, income, expense")
@@ -46,9 +48,10 @@ async function incrementYearHistory(
   db: Db,
   userId: string,
   month: number, year: number,
-  type: "income" | "expense",
+  type: string,
   amount: number
 ) {
+  if (!countsInTotals(type)) return; // transfers never touch history
   const { data: existing } = await db
     .from("year_history")
     .select("id, income, expense")

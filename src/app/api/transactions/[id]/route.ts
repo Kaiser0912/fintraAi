@@ -1,5 +1,6 @@
 import { getAuthUser } from "@/utils/supabase/auth";
 import { getRequestDb, type Db } from "@/utils/supabase/db";
+import { countsInTotals } from "@/lib/ledger";
 
 function parseDateParts(dateStr: string) {
   const [yearStr, monthStr, dayStr] = String(dateStr).split("T")[0].split("-");
@@ -14,9 +15,10 @@ async function adjustMonthHistory(
   db: Db,
   userId: string,
   day: number, month: number, year: number,
-  type: "income" | "expense",
+  type: string,
   delta: number
 ) {
+  if (!countsInTotals(type)) return; // transfers never touch history
   const { data: existing } = await db
     .from("month_history").select("id, income, expense")
     .eq("user_id", userId).eq("day", day).eq("month", month).eq("year", year)
@@ -32,9 +34,10 @@ async function adjustYearHistory(
   db: Db,
   userId: string,
   month: number, year: number,
-  type: "income" | "expense",
+  type: string,
   delta: number
 ) {
+  if (!countsInTotals(type)) return; // transfers never touch history
   const { data: existing } = await db
     .from("year_history").select("id, income, expense")
     .eq("user_id", userId).eq("month", month).eq("year", year)
@@ -50,9 +53,10 @@ async function incrementMonthHistory(
   db: Db,
   userId: string,
   day: number, month: number, year: number,
-  type: "income" | "expense",
+  type: string,
   amount: number
 ) {
+  if (!countsInTotals(type)) return; // transfers never touch history
   const { data: existing } = await db
     .from("month_history").select("id, income, expense")
     .eq("user_id", userId).eq("day", day).eq("month", month).eq("year", year)
@@ -75,9 +79,10 @@ async function incrementYearHistory(
   db: Db,
   userId: string,
   month: number, year: number,
-  type: "income" | "expense",
+  type: string,
   amount: number
 ) {
+  if (!countsInTotals(type)) return; // transfers never touch history
   const { data: existing } = await db
     .from("year_history").select("id, income, expense")
     .eq("user_id", userId).eq("month", month).eq("year", year)

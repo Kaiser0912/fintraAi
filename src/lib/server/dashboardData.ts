@@ -461,7 +461,7 @@ export async function getBudgetsData(db: Db, userId: string): Promise<BudgetsDat
 export interface RecentTransaction {
   id: string;
   date: string;
-  type: "income" | "expense";
+  type: "income" | "expense" | "transfer";
   amount: number;
   description: string | null;
   category: { id: string; name: string; icon: string } | null;

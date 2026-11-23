@@ -50,6 +50,7 @@ export function RecentTransactionsCard() {
         <ul className="divide-y divide-[var(--hairline)]">
           {recentTransactions.map((t) => {
             const isExpense = t.type === "expense";
+            const isTransfer = t.type === "transfer";
             return (
               <li key={t.id} className="flex items-baseline gap-4 py-3.5">
                 <span className="tnum w-14 shrink-0 text-xs text-[var(--ink-3)]">
@@ -58,15 +59,15 @@ export function RecentTransactionsCard() {
                 <span className="min-w-0 flex-1 truncate text-sm font-medium text-[var(--ink)]">
                   {t.description || t.category?.name || "Transaction"}
                   <span className="pl-2 text-[13px] font-normal text-[var(--ink-3)]">
-                    {t.category?.name || "Uncategorized"}
+                    {t.category?.name || (isTransfer ? "Transfer" : "Uncategorized")}
                   </span>
                 </span>
                 <span
                   className={`tnum shrink-0 text-sm font-medium ${
-                    isExpense ? "text-[var(--ink)]" : "text-[var(--pos)]"
+                    isExpense || isTransfer ? "text-[var(--ink)]" : "text-[var(--pos)]"
                   }`}
                 >
-                  {isExpense ? "−" : "+"}₹
+                  {isTransfer ? "↔ " : isExpense ? "−" : "+"}₹
                   {(t.amount || 0).toLocaleString("en-IN", { minimumFractionDigits: 2 })}
                 </span>
               </li>

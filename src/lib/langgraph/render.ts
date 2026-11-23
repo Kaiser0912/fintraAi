@@ -98,12 +98,12 @@ function listTransactionsView(j: Record<string, unknown>): DataView | null {
   const rows = (txs as TxRow[]).map((t) => {
     const amt = Number(t.amount ?? 0);
     if (t.type === "income") income += amt;
-    else expense += amt;
+    else if (t.type === "expense") expense += amt; // transfers are not spending
     return [
       t.date ?? "—",
       t.category ?? "—",
       t.description || "—",
-      `${t.type === "income" ? "+" : ""}${rupee(amt)}`,
+      `${t.type === "income" ? "+" : t.type === "transfer" ? "↔ " : ""}${rupee(amt)}`,
     ];
   });
 
