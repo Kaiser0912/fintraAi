@@ -2,6 +2,7 @@ import { tool } from "@langchain/core/tools";
 import { RunnableConfig } from "@langchain/core/runnables";
 import { z } from "zod";
 import { dbForToken, type Db } from "@/utils/supabase/db";
+import { getSharedSummary } from "@/lib/server/sharedSummary";
 import { hitlTools } from "./hitlTools";
 import { lastDueOnOrBefore, nextDueAfter, ordinal } from "@/lib/recurring";
 
@@ -91,7 +92,22 @@ export const getCategoriesToolDef = tool(
 // ─── Tool: add_transactions (single + bulk merged, Phase D) ─────────────────────
 
 const txItemSchema = z.object({
-  amount: z.number().min(1).describe("Amount in rupees (₹)"),
+  amount: z.number().min(0).optional().describe("Amount in ₹. For a shared bill, omit and use totalBill instead."),
+  // Shared bills only — the tool works out the user's share; don't do the maths.
+  totalBill: z.number().positive().optional().describe("Shared bill: the whole bill in ₹ before splitting"),
+  people: z.number().int().min(2).max(20).optional().describe("Shared bill: how many people share it, including the user"),
+  myShare: z.number().min(0).optional().describe("Shared bill: the user's share in ₹ when they state it ('my share 350')"),
+  paidBy: z.string().optional().describe("Shared bill: who paid — omit if the user paid, else the friend's name"),
+  // Some models nest the same fields under "split"; accept that shape too.
+  split: z
+    .object({
+      totalBill: z.number().positive().optional(),
+      people: z.number().int().min(2).max(20).optional(),
+      myShare: z.number().min(0).optional(),
+      paidBy: z.string().optional(),
+    })
+    .optional()
+    .describe("Optional alternative: the same shared-bill fields nested here"),
   type: z.enum(["income", "expense"]),
   categoryName: z
     .string()
@@ -113,8 +129,33 @@ export const addTransactionsToolDef = tool(
     const db = dbFromConfig(config);
     const messages: string[] = [];
     const errors: string[] = [];
+    const skipped: string[] = [];
+    // Rows saved by an EARLIER add_transactions call in this same chat turn.
+    // Some models call the tool again after it already succeeded; identical
+    // rows from that repeat are skipped. Rows within one call never dedupe
+    // each other (two identical coffees in one message both save), and other
+    // turns are never affected.
+    const callStart = new Date();
+    const turnStartedAt = (config as any)?.configurable?.turnStartedAt as string | undefined;
+    const { data: recentRows } = turnStartedAt
+      ? await db
+          .from("transactions")
+          .select("amount, type, category_id, date, description, split_total, split_payer")
+          .eq("user_id", userId)
+          .gte("created_at", turnStartedAt)
+          .lt("created_at", callStart.toISOString())
+      : { data: [] };
+    const recent = new Map<string, number>();
+    const keyOf = (r: { amount: unknown; type: unknown; category_id: unknown; date: unknown; description: unknown; split_total: unknown; split_payer: unknown }) =>
+      [Number(r.amount), r.type, r.category_id, r.date, (r.description ?? "").toString().trim().toLowerCase(), r.split_total == null ? "" : Number(r.split_total), r.split_payer ?? ""].join("|");
+    for (const r of recentRows ?? []) recent.set(keyOf(r), (recent.get(keyOf(r)) ?? 0) + 1);
 
     for (const tx of transactions) {
+      const shared = splitFields(tx);
+      if ("error" in shared) {
+        errors.push(shared.error);
+        continue;
+      }
       const category = await resolveCategoryId(db, tx.categoryName, tx.type);
       if (!category) {
         const { data: cats } = await db
@@ -128,40 +169,53 @@ export const addTransactionsToolDef = tool(
         continue;
       }
 
+      const key = keyOf({
+        amount: shared.columns.amount, type: tx.type, category_id: category.id, date: tx.date,
+        description: tx.description ?? null, split_total: shared.columns.split_total ?? null, split_payer: shared.columns.split_payer ?? null,
+      });
+      const seen = recent.get(key) ?? 0;
+      if (seen > 0) {
+        recent.set(key, seen - 1);
+        skipped.push(`₹${shared.columns.amount} ${category.name} on ${tx.date} (already added a moment ago)`);
+        continue;
+      }
+
       const { error } = await db
         .from("transactions")
         .insert({
           user_id: userId,
           category_id: category.id,
-          amount: Number(tx.amount),
           type: tx.type,
           date: tx.date,
           description: tx.description ?? null,
+          ...shared.columns,
         })
         .select("id")
         .single();
 
       if (error) {
-        errors.push(`₹${tx.amount} ${category.name}: ${error.message}`);
+        errors.push(`₹${shared.columns.amount} ${category.name}: ${error.message}`);
         continue;
       }
 
       messages.push(
-        `Added ${tx.type} of ₹${tx.amount} in ${category.name} on ${tx.date}${tx.description ? ` — "${tx.description}"` : ""}`
+        `Added ${tx.type} of ₹${shared.columns.amount} in ${category.name} on ${tx.date}${shared.note}${tx.description ? ` — "${tx.description}"` : ""}`
       );
     }
 
+    if (errors.length) console.warn("[add_transactions] rejected rows", errors);
     return JSON.stringify({
       added: messages.length,
       failed: errors.length,
       messages,
+      ...(skipped.length ? { skipped, note: "These were already saved by your previous call — do not add them again." } : {}),
       ...(errors.length ? { errors } : {}),
     });
   },
   {
     name: "add_transactions",
     description:
-      "Add income/expense transactions. Pass the ENTIRE list the user gave in ONE call (up to 50 rows). Never truncate or stop at a partial batch — every row the user listed must be in this call.",
+      "Add income/expense transactions. Pass the ENTIRE list the user gave in ONE call (up to 50 rows). Never truncate or stop at a partial batch — every row the user listed must be in this call. For a shared bill pass totalBill plus people and/or myShare (and paidBy if a friend paid) instead of amount; only the user's share counts as spending.",
     schema: z.object({
       transactions: z
         .array(txItemSchema)
@@ -777,6 +831,191 @@ export const createRecurringTransactionToolDef = tool(
 
 // ─── Exported tool registry ────────────────────────────────────────────────────
 
+// ─── Shared bills ──────────────────────────────────────────────────────────────
+
+const round2 = (n: number) => Math.round(n * 100) / 100;
+
+/**
+ * Some models occasionally emit malformed tool JSON where the bill fields end
+ * up inside the description string, e.g. 'movie","totalBill":1200,"people":3'.
+ * Pull those numbers back out and clean the note.
+ */
+function recoverLeakedFields(tx: z.infer<typeof txItemSchema>): z.infer<typeof txItemSchema> {
+  const d = tx.description;
+  if (!d || tx.amount != null || tx.totalBill != null || !/"(amount|totalBill)"\s*:/.test(d)) return tx;
+  const num = (k: string) => {
+    const m = new RegExp(`"${k}"\\s*:\\s*(\\d+(?:\\.\\d+)?)`).exec(d);
+    return m ? Number(m[1]) : undefined;
+  };
+  const str = (k: string) => {
+    const m = new RegExp(`"${k}"\\s*:\\s*"([^"]*)"`).exec(d);
+    return m ? m[1] : undefined;
+  };
+  return {
+    ...tx,
+    amount: num("amount"),
+    totalBill: num("totalBill"),
+    people: num("people"),
+    myShare: num("myShare"),
+    paidBy: str("paidBy"),
+    description: d.split(/"\s*,\s*"/)[0].replace(/["\\]+$/, "").trim() || undefined,
+  };
+}
+
+/** Turns a tool row into DB columns: amount = the user's share. */
+function splitFields(input: z.infer<typeof txItemSchema>):
+  | { columns: Record<string, unknown> & { amount: number }; note: string }
+  | { error: string } {
+  const tx = recoverLeakedFields(input);
+  const totalBill = tx.totalBill ?? tx.split?.totalBill;
+  const people = tx.people ?? tx.split?.people;
+  const myShare = tx.myShare ?? tx.split?.myShare;
+  const paidBy = tx.paidBy ?? tx.split?.paidBy;
+  if (totalBill == null) {
+    if (tx.amount == null || tx.amount <= 0) return { error: "Missing amount. Send amount (a number field) — or for a shared bill send totalBill as its own number field plus people/myShare/paidBy. Never put numbers inside description." };
+    return { columns: { amount: tx.amount }, note: "" };
+  }
+  if (myShare == null && !people) return { error: `For the ₹${totalBill} shared bill, say how many people or the user's share` };
+  const share = myShare ?? round2(totalBill / (people as number));
+  if (share > totalBill) return { error: `Share ₹${share} is more than the ₹${totalBill} bill` };
+  const someoneElse = paidBy && !/^(me|i|myself|self|user)$/i.test(paidBy.trim()) ? paidBy.trim() : null;
+  return {
+    columns: {
+      amount: share,
+      split_total: totalBill,
+      split_people: people ?? null,
+      split_uneven: myShare != null,
+      paid_amount: someoneElse ? 0 : totalBill,
+      split_payer: someoneElse,
+    },
+    note: someoneElse
+      ? ` (your share of ₹${totalBill}; ${someoneElse} paid)`
+      : ` (your share; you paid ₹${totalBill}, ₹${round2(totalBill - share)} fronted for friends)`,
+  };
+}
+
+// Dedicated tool for one shared bill. totalBill is REQUIRED here: models fill
+// required number fields far more reliably than optional ones on a general tool.
+export const logSharedBillToolDef = tool(
+  async (
+    input: { totalBill: number; people?: number; myShare?: number; paidBy?: string; categoryName: string; date: string; description?: string },
+    config?: RunnableConfig
+  ): Promise<string> => {
+    const userId = (config as any)?.configurable?.userId as string | undefined;
+    if (!userId) return "Error: Not authenticated";
+    const shared = splitFields({ ...input, type: "expense" });
+    if ("error" in shared) return `Error: ${shared.error}`;
+    const db = dbFromConfig(config);
+    const category = await resolveCategoryId(db, input.categoryName, "expense");
+    if (!category) return `Error: Category "${input.categoryName}" not found for expense`;
+
+    // Same repeat-call guard as add_transactions, scoped to this chat turn.
+    const turnStartedAt = (config as any)?.configurable?.turnStartedAt as string | undefined;
+    if (turnStartedAt) {
+      let q = db
+        .from("transactions")
+        .select("id", { count: "exact", head: true })
+        .eq("user_id", userId)
+        .eq("category_id", category.id)
+        .eq("date", input.date)
+        .eq("amount", shared.columns.amount)
+        .eq("split_total", input.totalBill)
+        .gte("created_at", turnStartedAt);
+      q = shared.columns.split_payer ? q.eq("split_payer", shared.columns.split_payer as string) : q.is("split_payer", null);
+      const { count } = await q;
+      if (count) return JSON.stringify({ success: true, message: "Already saved earlier in this turn — not added again." });
+    }
+
+    const { error } = await db.from("transactions").insert({
+      user_id: userId,
+      category_id: category.id,
+      type: "expense",
+      date: input.date,
+      description: input.description ?? null,
+      ...shared.columns,
+    });
+    if (error) return `Error: ${error.message}`;
+    return JSON.stringify({
+      success: true,
+      message: `Added your share ₹${shared.columns.amount} in ${category.name} on ${input.date}${shared.note}${input.description ? ` — "${input.description}"` : ""}`,
+    });
+  },
+  {
+    name: "log_shared_bill",
+    description:
+      "Log ONE shared bill (split with friends). Only the user's share counts as spending; the tool computes it. Use for 'X dinner, my share Y', 'X movie, N of us', 'Priya paid X for ..., N of us'.",
+    schema: z.object({
+      totalBill: z.number().positive().describe("The whole bill in ₹ before splitting (required)"),
+      people: z.number().int().min(2).max(20).optional().describe("How many people share it, including the user"),
+      myShare: z.number().min(0).optional().describe("The user's share in ₹ if they stated it"),
+      paidBy: z.string().optional().describe("Who paid: omit if the user paid, else the friend's name"),
+      categoryName: z.string().describe("Expense category, e.g. Food and drinks, Entertainment"),
+      date: z.string().describe("Date as YYYY-MM-DD"),
+      description: z.string().optional().describe("Short note, plain text only"),
+    }),
+  }
+);
+
+export const settleUpToolDef = tool(
+  async (
+    { direction, counterparty, amount, date, description }: { direction: "in" | "out"; counterparty: string; amount: number; date: string; description?: string },
+    config?: RunnableConfig
+  ): Promise<string> => {
+    const userId = (config as any)?.configurable?.userId as string | undefined;
+    if (!userId) return "Error: Not authenticated";
+    const db = dbFromConfig(config);
+    const { error } = await db.from("transactions").insert({
+      user_id: userId,
+      type: "transfer",
+      transfer_direction: direction,
+      counterparty,
+      amount,
+      date,
+      description: description ?? null,
+      category_id: null,
+    });
+    if (error) return `Error: ${error.message}`;
+    return JSON.stringify({
+      success: true,
+      message: direction === "in"
+        ? `Recorded ₹${amount} received from ${counterparty} on ${date} (a transfer, not income)`
+        : `Recorded ₹${amount} paid back to ${counterparty} on ${date} (a transfer, not spending)`,
+    });
+  },
+  {
+    name: "settle_up",
+    description:
+      "Record money moving between the user and a friend: a friend paying the user back (direction 'in') or the user paying a friend back (direction 'out'). Saved as a transfer — never income or spending. Do not use add_transactions for these.",
+    schema: z.object({
+      direction: z.enum(["in", "out"]).describe("'in' = user got money back; 'out' = user paid someone back"),
+      counterparty: z.string().min(1).describe("The friend's name"),
+      amount: z.number().positive().describe("Amount in ₹"),
+      date: z.string().describe("Date as YYYY-MM-DD"),
+      description: z.string().optional(),
+    }),
+  }
+);
+
+export const getSharedSummaryToolDef = tool(
+  async ({ month }: { month?: string }, config?: RunnableConfig): Promise<string> => {
+    const userId = (config as any)?.configurable?.userId as string | undefined;
+    if (!userId) return "Error: Not authenticated";
+    const today = ((config as any)?.configurable?.today as string | undefined) ?? new Date().toISOString().slice(0, 10);
+    const [y, m] = (month ?? today.slice(0, 7)).split("-").map(Number);
+    if (!y || !m || m < 1 || m > 12) return "Error: month must be YYYY-MM";
+    const summary = await getSharedSummary(dbFromConfig(config), userId, y, m);
+    return JSON.stringify(summary);
+  },
+  {
+    name: "get_shared_summary",
+    description:
+      "Money shared with friends in a month: fronted (paid for friends beyond the user's share), gotBack (friends paid the user back), friendsCovered (user's share of bills a friend paid), paidBack (user paid friends back), owedToYou and youOwe. Use for 'how much did I front', 'who owes me', 'what do I owe'.",
+    schema: z.object({
+      month: z.string().optional().describe("YYYY-MM; omit for the current month"),
+    }),
+  }
+);
+
 export const financeTools = [
   // get_categories intentionally omitted from the bound set — the full category
   // list is injected into the system prompt, and add/edit return the available
@@ -787,6 +1026,9 @@ export const financeTools = [
   getReportToolDef,
   budgetToolDef,
   createRecurringTransactionToolDef,
+  logSharedBillToolDef,
+  settleUpToolDef,
+  getSharedSummaryToolDef,
   ...hitlTools,
 ];
 
@@ -795,5 +1037,7 @@ export const MUTATING_TOOL_NAMES = new Set([
   "add_transactions",
   "edit_transaction",
   "budget",
+  "settle_up",
+  "log_shared_bill",
 ]);
   

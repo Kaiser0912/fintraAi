@@ -133,6 +133,8 @@ export async function runChat(
       thread_id: body.threadId,
       userId,
       accessToken,
+      // Lets add_transactions skip rows it already saved earlier in this turn.
+      turnStartedAt: new Date(startedAt).toISOString(),
       today,
       modelProvider: model.provider,
       modelName: model.modelName,
