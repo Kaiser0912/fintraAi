@@ -5,6 +5,7 @@ import { Toaster } from "sonner";
 import { AuthProvider } from "@/components/auth/AuthProvider";
 import { ThemeProvider } from "@/components/ThemeProvider";
 import { PwaInit } from "@/components/common/PwaInit";
+import { NativeAuthBridge } from "@/components/common/NativeAuthBridge";
 import { createClient } from "@/utils/supabase/server";
 
 const geistSans = Geist({
@@ -74,6 +75,7 @@ export default async function RootLayout({
           <Toaster richColors />
           {/* Attaches the beforeinstallprompt capture on first load */}
           <PwaInit />
+          <NativeAuthBridge />
         </AuthProvider>
       </body>
     </html>
