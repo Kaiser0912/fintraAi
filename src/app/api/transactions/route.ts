@@ -8,6 +8,7 @@ import {
   validationError,
 } from "@/lib/transactionApi";
 import { dbErrorResponse } from "@/lib/dbErrors";
+import { payeeInputSchema, rememberPayee } from "@/lib/payeeApi";
 export const dynamic = "force-dynamic";
 
 function unauthorized() {
@@ -23,7 +24,13 @@ export async function POST(req: Request) {
   try { body = await req.json(); }
   catch { return new Response("Invalid JSON body", { status: 400 }); }
 
-  const parsed = createTransactionSchema.safeParse(body);
+  // Optional `payee` (from a scanned UPI QR): saved/updated with this
+  // payment's purpose and category, then linked through payeeId.
+  const { payee: payeeBody, ...txBody } = (body ?? {}) as { payee?: unknown };
+  const payeeParsed = payeeBody === undefined ? null : payeeInputSchema.safeParse(payeeBody);
+  if (payeeParsed && !payeeParsed.success) return validationError(payeeParsed.error);
+
+  const parsed = createTransactionSchema.safeParse(txBody);
   if (!parsed.success) return validationError(parsed.error);
   const input = parsed.data;
 
@@ -34,6 +41,16 @@ export async function POST(req: Request) {
 
   if (catError || !category) return new Response("Category not found", { status: 404 });
   if (category.type !== input.type) return new Response("Category type mismatch", { status: 400 });
+
+  if (payeeParsed?.success) {
+    const saved = await rememberPayee(db, {
+      ...payeeParsed.data,
+      categoryId: input.categoryId,
+      purpose: input.description ?? null,
+    });
+    if ("error" in saved) return Response.json({ error: "invalid_request", message: saved.error }, { status: 400 });
+    input.payeeId = saved.id;
+  }
 
   const { data: transaction, error: txError } = await db
     .from("transactions")
