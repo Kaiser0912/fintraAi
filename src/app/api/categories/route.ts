@@ -10,7 +10,7 @@ export async function GET(req: Request) {
   }
 
   const supabase = await getRequestDb();
-  let query = supabase.from("categories").select("id, name, icon").order("name");
+  let query = supabase.from("categories").select("id, name, icon").eq("hidden", false).order("name");
   if (type) query = query.eq("type", type);
 
   const { data, error } = await query;

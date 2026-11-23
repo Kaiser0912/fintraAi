@@ -45,6 +45,7 @@ async function buildCategorySummary(db: Db): Promise<string> {
     const { data } = await db
       .from("categories")
       .select("name, type")
+      .eq("hidden", false)
       .order("type")
       .order("name");
 

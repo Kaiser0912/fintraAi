@@ -17,10 +17,15 @@ import { format } from "date-fns"
 type Transaction = {
   id: string
   amount: number
-  type: "income" | "expense"
+  type: "income" | "expense" | "transfer"
   description: string | null
   date: string
-  category: { id: string; name: string; icon: string }
+  category: { id: string; name: string; icon: string } | null
+}
+
+type EditableTransaction = Transaction & {
+  type: "income" | "expense"
+  category: NonNullable<Transaction["category"]>
 }
 
 type Pagination = {
@@ -129,7 +134,7 @@ function RowActions({
   onEdit,
   onDelete,
 }: {
-  onEdit: () => void
+  onEdit?: () => void
   onDelete: () => Promise<void>
 }) {
   // Delete is tap-to-confirm: first tap arms (button turns clay and says so),
@@ -149,7 +154,7 @@ function RowActions({
 
   return (
     <div className="flex items-center justify-end gap-0.5">
-      {!busy && (
+      {!busy && onEdit && (
         <button
           onClick={onEdit}
           aria-label="Edit transaction"
@@ -188,7 +193,13 @@ function RowActions({
 
 export function TransactionTable({ transactions, pagination, isLoading, onPageChange, onRefresh }: Props) {
   const { openAdd } = useQuickAdd()
-  const [editTx, setEditTx] = useState<Transaction | null>(null)
+  // Transfers are edited through Settle up (FIN-25), not the income/expense form.
+  const [editTx, setEditTx] = useState<EditableTransaction | null>(null)
+  const editHandler = (tx: Transaction) => {
+    const { type, category } = tx
+    if (type === "transfer" || !category) return undefined
+    return () => setEditTx({ ...tx, type, category })
+  }
 
   // Confirmation happens inline on the row button (tap-to-confirm),
   // so by the time this runs the user has already tapped twice.
@@ -262,7 +273,7 @@ export function TransactionTable({ transactions, pagination, isLoading, onPageCh
                   isIncome ? "text-[var(--pos)]" : "text-[var(--ink)]"
                 }`}
               >
-                {isIncome ? "+" : "−"}₹
+                {isIncome ? "+" : tx.type === "transfer" ? "↔ " : "−"}₹
                 {tx.amount.toLocaleString("en-IN", {
                   minimumFractionDigits: 2,
                   maximumFractionDigits: 2,
@@ -276,16 +287,16 @@ export function TransactionTable({ transactions, pagination, isLoading, onPageCh
                 <div className="flex items-start justify-between gap-3 py-3.5 md:hidden">
                   <div className="min-w-0">
                     <p className="truncate text-sm font-medium text-[var(--ink)]">
-                      {tx.description || tx.category.name}
+                      {tx.description || tx.category?.name || "Transfer"}
                     </p>
                     <p className="tnum mt-1 text-xs text-[var(--ink-3)]">
-                      {format(txDate, "dd MMM yyyy")} · {tx.category.name}
+                      {format(txDate, "dd MMM yyyy")} · {tx.category?.name ?? "Transfer"}
                     </p>
                   </div>
                   <div className="flex shrink-0 flex-col items-end gap-1">
                     {amount}
                     <RowActions
-                      onEdit={() => setEditTx(tx)}
+                      onEdit={editHandler(tx)}
                       onDelete={() => handleDelete(tx)}
                     />
                   </div>
@@ -303,11 +314,11 @@ export function TransactionTable({ transactions, pagination, isLoading, onPageCh
                     )}
                   </div>
                   <div className="truncate text-sm text-[var(--ink-2)]">
-                    {tx.category.name}
+                    {tx.category?.name ?? "Transfer"}
                   </div>
                   <div className="text-right">{amount}</div>
                   <RowActions
-                    onEdit={() => setEditTx(tx)}
+                    onEdit={editHandler(tx)}
                     onDelete={() => handleDelete(tx)}
                   />
                 </div>

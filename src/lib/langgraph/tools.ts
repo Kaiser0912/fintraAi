@@ -4,6 +4,7 @@ import { z } from "zod";
 import { dbForToken, type Db } from "@/utils/supabase/db";
 import { hitlTools } from "./hitlTools";
 import { lastDueOnOrBefore, nextDueAfter, ordinal } from "@/lib/recurring";
+import { countsInTotals } from "@/lib/ledger";
 
 // ─── Internal types ────────────────────────────────────────────────────────────
 
@@ -41,9 +42,10 @@ async function upsertMonthHistory(
   day: number,
   month: number,
   year: number,
-  type: TransactionType,
+  type: string,
   delta: number
 ) {
+  if (!countsInTotals(type)) return; // transfers never touch history
   const { data: row } = await db
     .from("month_history")
     .select("id, income, expense")
@@ -84,9 +86,10 @@ async function upsertYearHistory(
   userId: string,
   month: number,
   year: number,
-  type: TransactionType,
+  type: string,
   delta: number
 ) {
+  if (!countsInTotals(type)) return; // transfers never touch history
   const { data: row } = await db
     .from("year_history")
     .select("id, income, expense")
@@ -130,7 +133,8 @@ async function resolveCategoryId(
   const { data } = await db
     .from("categories")
     .select("id, name")
-    .eq("type", type);
+    .eq("type", type)
+    .eq("hidden", false);
 
   if (!data?.length) return null;
 
@@ -152,7 +156,7 @@ export const getCategoriesToolDef = tool(
     config?: RunnableConfig
   ): Promise<string> => {
     const db = dbFromConfig(config);
-    let query = db.from("categories").select("id, name, icon, type").order("name");
+    let query = db.from("categories").select("id, name, icon, type").eq("hidden", false).order("name");
     if (type && type !== "all") query = (query as any).eq("type", type);
 
     const { data, error } = await query;
@@ -211,7 +215,8 @@ export const addTransactionsToolDef = tool(
         const { data: cats } = await db
           .from("categories")
           .select("name")
-          .eq("type", tx.type);
+          .eq("type", tx.type)
+    .eq("hidden", false);
         errors.push(
           `Category "${tx.categoryName}" not found for ${tx.type}. Available: ${cats?.map((c) => c.name).join(", ") ?? "none"}`
         );
@@ -858,7 +863,8 @@ export const createRecurringTransactionToolDef = tool(
       const { data: cats } = await db
         .from("categories")
         .select("name")
-        .eq("type", type);
+        .eq("type", type)
+    .eq("hidden", false);
       return `Category "${categoryName}" not found for ${type}. Available: ${cats?.map((c) => c.name).join(", ") ?? "none"}`;
     }
 
