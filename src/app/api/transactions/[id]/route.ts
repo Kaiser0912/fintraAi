@@ -1,66 +1,116 @@
 import { getAuthUser } from "@/utils/supabase/auth";
-import { getRequestDb } from "@/utils/supabase/db";
+import { getRequestDb, type Db } from "@/utils/supabase/db";
+import {
+  patchTransactionSchema,
+  replaceTransactionSchema,
+  toApiTransaction,
+  toDbColumns,
+  TX_SELECT,
+  validationError,
+} from "@/lib/transactionApi";
+import { dbErrorResponse } from "@/lib/dbErrors";
 
-export async function DELETE(
-  req: Request,
-  context: { params: Promise<{ id: string }> }
-) {
+type Ctx = { params: Promise<{ id: string }> };
+
+async function findOwned(db: Db, id: string, userId: string) {
+  const { data } = await db
+    .from("transactions").select("id, type, category_id")
+    .eq("id", id).eq("user_id", userId).maybeSingle();
+  return data;
+}
+
+async function categoryMatches(db: Db, categoryId: string, type: string) {
+  const { data } = await db.from("categories").select("type").eq("id", categoryId).maybeSingle();
+  if (!data) return "Category not found";
+  if (data.type !== type) return "Category type mismatch";
+  return null;
+}
+
+export async function DELETE(req: Request, context: Ctx) {
   const user = await getAuthUser();
   if (!user) return new Response("Unauthorized", { status: 401 });
-  const userId = user.id;
 
-  const { id: transactionId } = await context.params;
+  const { id } = await context.params;
   const db = await getRequestDb();
 
-  const { data: tx, error: fetchError } = await db
-    .from("transactions").select("id")
-    .eq("id", transactionId).eq("user_id", userId).single();
+  if (!(await findOwned(db, id, user.id))) return new Response("Transaction not found", { status: 404 });
 
-  if (fetchError || !tx) return new Response("Transaction not found", { status: 404 });
-
-  const { error: deleteError } = await db
-    .from("transactions").delete().eq("id", transactionId).eq("user_id", userId);
-
-  if (deleteError) {
-    console.error("[DELETE /api/transactions/:id]", deleteError);
-    return new Response(`DB Error: ${deleteError.message}`, { status: 500 });
-  }
+  const { error } = await db.from("transactions").delete().eq("id", id).eq("user_id", user.id);
+  if (error) return dbErrorResponse("DELETE /api/transactions/:id", error);
 
   return new Response(null, { status: 204 });
 }
 
-export async function PUT(
-  req: Request,
-  context: { params: Promise<{ id: string }> }
-) {
+// Full replace of the editable fields (the edit form uses this).
+export async function PUT(req: Request, context: Ctx) {
   const user = await getAuthUser();
   if (!user) return new Response("Unauthorized", { status: 401 });
-  const userId = user.id;
 
-  const { id: transactionId } = await context.params;
+  const { id } = await context.params;
 
-  let body: any;
+  let body: unknown;
   try { body = await req.json(); }
   catch { return new Response("Invalid JSON body", { status: 400 }); }
 
-  const { amount, date, description, categoryId, type } = body;
+  const parsed = replaceTransactionSchema.safeParse(body);
+  if (!parsed.success) return validationError(parsed.error);
+
   const db = await getRequestDb();
+  const existing = await findOwned(db, id, user.id);
+  if (!existing) return new Response("Transaction not found", { status: 404 });
+  if (existing.type === "transfer") return new Response("Transfers are edited through Settle up", { status: 400 });
 
-  const { data: oldTx, error: fetchError } = await db
-    .from("transactions").select("id")
-    .eq("id", transactionId).eq("user_id", userId).single();
+  const mismatch = await categoryMatches(db, parsed.data.categoryId, parsed.data.type);
+  if (mismatch) return new Response(mismatch, { status: mismatch === "Category not found" ? 404 : 400 });
 
-  if (fetchError || !oldTx) return new Response("Transaction not found", { status: 404 });
-
-  const { error: updateError } = await db
+  const { error } = await db
     .from("transactions")
-    .update({ amount: Number(amount), date, description: description ?? null, category_id: categoryId, type })
-    .eq("id", transactionId).eq("user_id", userId);
+    .update({ ...toDbColumns(parsed.data), description: parsed.data.description ?? null })
+    .eq("id", id).eq("user_id", user.id);
 
-  if (updateError) {
-    console.error("[PUT /api/transactions/:id]", updateError);
-    return new Response(`DB Error: ${updateError.message}`, { status: 500 });
-  }
+  if (error) return dbErrorResponse("PUT /api/transactions/:id", error);
 
   return new Response("Transaction updated", { status: 200 });
+}
+
+// Partial update; returns the updated transaction.
+export async function PATCH(req: Request, context: Ctx) {
+  const user = await getAuthUser();
+  if (!user) return new Response("Unauthorized", { status: 401 });
+
+  const { id } = await context.params;
+
+  let body: unknown;
+  try { body = await req.json(); }
+  catch { return new Response("Invalid JSON body", { status: 400 }); }
+
+  const parsed = patchTransactionSchema.safeParse(body);
+  if (!parsed.success) return validationError(parsed.error);
+  const input = parsed.data;
+
+  const db = await getRequestDb();
+  const existing = await findOwned(db, id, user.id);
+  if (!existing) return new Response("Transaction not found", { status: 404 });
+  if (existing.type === "transfer" && (input.type || input.categoryId)) {
+    return new Response("Transfers are edited through Settle up", { status: 400 });
+  }
+
+  if (input.type || input.categoryId) {
+    const mismatch = await categoryMatches(
+      db,
+      input.categoryId ?? existing.category_id,
+      input.type ?? existing.type
+    );
+    if (mismatch) return new Response(mismatch, { status: mismatch === "Category not found" ? 404 : 400 });
+  }
+
+  const { data, error } = await db
+    .from("transactions")
+    .update(toDbColumns(input))
+    .eq("id", id).eq("user_id", user.id)
+    .select(TX_SELECT).single();
+
+  if (error) return dbErrorResponse("PATCH /api/transactions/:id", error);
+
+  return Response.json(toApiTransaction(data));
 }
