@@ -7,9 +7,10 @@ import {
   getBudgetsData,
   getRecentTransactionsData,
 } from "@/lib/server/dashboardData";
+import { getSharedSummary } from "@/lib/server/sharedSummary";
 export const dynamic = "force-dynamic";
 
-// Everything the dashboard needs in one request: one auth round-trip, the five
+// Everything the dashboard needs in one request: one auth round-trip, the six
 // data loads in parallel server-side. Trends always come back as 12 months —
 // the 6M/12M toggle slices client-side instead of refetching.
 
@@ -25,15 +26,16 @@ export async function GET() {
   const db = await getRequestDb();
 
   try {
-    const [summary, insights, trends, budgets, recent] = await Promise.all([
+    const [summary, insights, trends, budgets, recent, shared] = await Promise.all([
       getSummaryData(db, userId, start.toISOString(), end.toISOString()),
       getInsightsData(db, userId),
       getTrendsData(db, userId, 12),
       getBudgetsData(db, userId),
       getRecentTransactionsData(db, userId, 7),
+      getSharedSummary(db, userId, now.getFullYear(), now.getMonth() + 1),
     ]);
 
-    return Response.json({ summary, insights, trends, budgets, recent });
+    return Response.json({ summary, insights, trends, budgets, recent, shared });
   } catch (error) {
     console.error("[GET /api/dashboard]", error);
     return new Response("Internal Server Error", { status: 500 });
