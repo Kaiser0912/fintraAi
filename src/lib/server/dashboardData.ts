@@ -1,4 +1,5 @@
 import { type Db } from "@/utils/supabase/db";
+import { toApiTransaction, TX_SELECT } from "@/lib/transactionApi";
 
 // ─── Shared dashboard data loaders ──────────────────────────────────────────────
 //
@@ -458,14 +459,7 @@ export async function getBudgetsData(db: Db, userId: string): Promise<BudgetsDat
 
 // ─── Recent transactions (latest N, same shape as GET /api/transactions) ────────
 
-export interface RecentTransaction {
-  id: string;
-  date: string;
-  type: "income" | "expense" | "transfer";
-  amount: number;
-  description: string | null;
-  category: { id: string; name: string; icon: string } | null;
-}
+export type RecentTransaction = ReturnType<typeof toApiTransaction>;
 
 export async function getRecentTransactionsData(
   db: Db,
@@ -474,21 +468,12 @@ export async function getRecentTransactionsData(
 ): Promise<RecentTransaction[]> {
   const { data, error } = await db
     .from("transactions")
-    .select("id, date, type, amount, description, categories(id, name, icon)")
+    .select(TX_SELECT)
     .eq("user_id", userId)
     .order("date", { ascending: false })
     .range(0, limit - 1);
 
   if (error) throw error;
 
-  return (data ?? []).map((row: any) => ({
-    id: row.id,
-    date: row.date,
-    type: row.type,
-    amount: Number(row.amount),
-    description: row.description,
-    category: row.categories
-      ? { id: row.categories.id, name: row.categories.name, icon: row.categories.icon }
-      : null,
-  }));
+  return (data ?? []).map(toApiTransaction);
 }
