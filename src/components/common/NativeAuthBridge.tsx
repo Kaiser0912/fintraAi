@@ -4,7 +4,7 @@ import { useEffect } from "react"
 import { isNativeApp, NATIVE_AUTH_CALLBACK } from "@/lib/native"
 
 /**
- * Android app only: when Google sign-in finishes in Chrome, Supabase redirects
+ * Android app only. Skips the landing page, and when Google sign-in finishes in Chrome, Supabase redirects
  * to com.fintra.app://auth/callback?code=…, which Android hands back to the
  * app. Close the Chrome tab and finish the sign-in inside the app's WebView,
  * where the PKCE verifier cookie lives.
@@ -12,6 +12,12 @@ import { isNativeApp, NATIVE_AUTH_CALLBACK } from "@/lib/native"
 export function NativeAuthBridge() {
   useEffect(() => {
     if (!isNativeApp()) return
+    // The app has no use for the marketing landing page: go to the dashboard
+    // (signed-out users are sent on to /sign-in by the middleware).
+    if (window.location.pathname === "/") {
+      window.location.replace("/dashboard")
+      return
+    }
     let remove: (() => void) | undefined
 
     ;(async () => {

@@ -67,8 +67,19 @@ case "$url" in
   *fintra-ai-xi.vercel.app*) pass "app loads the live site ($url)";;
   *) bad "app did not load the live site (WebView url: '${url:-none}')";;
 esac
-url=$(wait_for_url "/sign-in" 30)
-case "$url" in *"/sign-in"*) pass "signed-out app shows sign-in";; *) bad "expected /sign-in, got '${url:-none}'";; esac
+url=$(wait_for_url "/sign-in" 20)
+case "$url" in
+  *"/sign-in"*) pass "signed-out app goes straight to sign-in";;
+  *)
+    # Older web build without the in-app landing redirect: use the landing page's link.
+    echo "INFO  app opened on '${url:-none}', tapping 'Sign in'" | tee -a "$RESULTS"
+    sleep 5
+    shot 1b-landing
+    tap_text 'text="Sign in"' || tap_text 'Sign in'
+    url=$(wait_for_url "/sign-in" 30)
+    case "$url" in *"/sign-in"*) pass "reached sign-in from the landing page";; *) bad "could not reach /sign-in (at '${url:-none}')";; esac
+    ;;
+esac
 sleep 4
 shot 2-sign-in
 
