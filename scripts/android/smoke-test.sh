@@ -51,6 +51,7 @@ tap_text() {
   node=$(sed 's/>/>\n/g' "$OUT/ui.xml" | grep -i "$1" | head -1)
   bounds=$(echo "$node" | grep -o 'bounds="\[[0-9]*,[0-9]*\]\[[0-9]*,[0-9]*\]"' | head -1)
   [ -z "$bounds" ] && return 1
+  case "$bounds" in *"[0,0][0,0]"*) return 1;; esac
   local x1 y1 x2 y2
   read -r x1 y1 x2 y2 <<<"$(echo "$bounds" | grep -o '[0-9]*' | tr '\n' ' ')"
   adb shell input tap $(( (x1 + x2) / 2 )) $(( (y1 + y2) / 2 ))
@@ -71,13 +72,15 @@ url=$(wait_for_url "/sign-in" 20)
 case "$url" in
   *"/sign-in"*) pass "signed-out app goes straight to sign-in";;
   *)
-    # Older web build without the in-app landing redirect: use the landing page's link.
-    echo "INFO  app opened on '${url:-none}', tapping 'Sign in'" | tee -a "$RESULTS"
+    # Older web build without the in-app landing redirect. On phone width the
+    # landing page only shows "Get started free" (Sign in is hidden), which
+    # opens /sign-up — it has the same Google button.
+    echo "INFO  app opened on '${url:-none}', tapping 'Get started free'" | tee -a "$RESULTS"
     sleep 5
     shot 1b-landing
-    tap_text 'text="Sign in"' || tap_text 'Sign in'
-    url=$(wait_for_url "/sign-in" 30)
-    case "$url" in *"/sign-in"*) pass "reached sign-in from the landing page";; *) bad "could not reach /sign-in (at '${url:-none}')";; esac
+    tap_text 'text="Get started free"'
+    url=$(wait_for_url "/sign-" 30)
+    case "$url" in *"/sign-"*) pass "reached the sign-up page from the landing page ($url)";; *) bad "could not reach sign-in/up (at '${url:-none}')";; esac
     ;;
 esac
 sleep 4
