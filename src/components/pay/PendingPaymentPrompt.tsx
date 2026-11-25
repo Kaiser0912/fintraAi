@@ -15,6 +15,7 @@ import {
   type PendingPayment,
 } from "@/lib/payFlow"
 import { clearPayDraft } from "@/lib/upiQr"
+import { confirmationFor, forgetCaptured } from "@/lib/autoLog"
 
 export const PAY_DONE_KEY = "fintra-pay-done"
 
@@ -35,23 +36,57 @@ export function PendingPaymentPrompt() {
     return p
   }, [])
 
+  /** Marks the payment paid and shows the Logged screen. */
+  const confirm = useCallback(
+    async (p: PendingPayment) => {
+      await markPaid(p.txId)
+      try {
+        sessionStorage.setItem(PAY_DONE_KEY, JSON.stringify(p))
+      } catch {}
+      clearPending()
+      clearPayDraft()
+      router.push("/pay/done")
+    },
+    [router]
+  )
+
   useEffect(() => {
+    let cancelled = false
+    // Before asking: if the UPI app's notification already says it was paid
+    // (auto-log), confirm it without a question.
+    async function askOrConfirm(p: PendingPayment) {
+      const notice = await confirmationFor(p)
+      if (cancelled) return
+      if (notice) {
+        try {
+          await confirm(p)
+          await forgetCaptured([notice.id])
+          return
+        } catch {
+          // fall through to asking
+        }
+      }
+      setOpen(true)
+    }
+
     // Reopened Fintra with a payment still pending (e.g. Android restarted it).
     const p = refresh()
-    if (p && Date.now() - p.handedOffAt > 3000) setOpen(true)
+    if (p && Date.now() - p.handedOffAt > 3000) askOrConfirm(p)
 
     const onVisible = () => {
       if (document.visibilityState !== "visible") return
       const cur = refresh()
-      if (cur && Date.now() - cur.handedOffAt > 1500) setOpen(true)
+      // Give the UPI app's notification a moment to arrive.
+      if (cur && Date.now() - cur.handedOffAt > 1500) setTimeout(() => askOrConfirm(cur), 800)
     }
     document.addEventListener("visibilitychange", onVisible)
     window.addEventListener("fintra-pay-pending", refresh)
     return () => {
+      cancelled = true
       document.removeEventListener("visibilitychange", onVisible)
       window.removeEventListener("fintra-pay-pending", refresh)
     }
-  }, [refresh])
+  }, [refresh, confirm])
 
   if (!pending || !open || pathname?.startsWith("/pay/done")) return null
 
@@ -60,13 +95,10 @@ export function PendingPaymentPrompt() {
     setBusy(true)
     setError(null)
     try {
-      await markPaid(pending.txId)
-      try {
-        sessionStorage.setItem(PAY_DONE_KEY, JSON.stringify(pending))
-      } catch {}
-      clearPending()
-      clearPayDraft()
-      router.push("/pay/done")
+      await confirm(pending)
+      // The UPI app's notification for this payment is now handled too.
+      const notice = await confirmationFor(pending)
+      if (notice) await forgetCaptured([notice.id])
     } catch (e) {
       setError(e instanceof Error ? e.message : "Couldn't save. Try again.")
     } finally {
