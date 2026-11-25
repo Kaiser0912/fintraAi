@@ -77,7 +77,6 @@ export default function PayGoPage() {
   const t = draft.target
   const amount = draft.amount as number
   const name = draft.payeeName || t.name || t.upiId
-  const qrHasAmount = t.amount != null
   const quickApps = UPI_APPS.filter((a) => !blocked.includes(a.id))
 
   /** Saves the pending payment once; later taps reuse it. */
@@ -106,7 +105,7 @@ export default function PayGoPage() {
   const payShop = () =>
     run(async () => {
       await handOff({ method: "shop" })
-      openShopQr(t.raw as string)
+      openShopQr(t.raw as string, amount)
     })
 
   const quickPay = (app: UpiApp) =>
@@ -172,11 +171,6 @@ export default function PayGoPage() {
             Pay in your UPI app
             <ExternalLink className="h-4 w-4" aria-hidden />
           </button>
-          {!qrHasAmount && (
-            <p className="text-sm text-[var(--ink-2)]">
-              This QR has no amount: enter <strong className="tnum">{inr(amount)}</strong> in the UPI app.
-            </p>
-          )}
           <button onClick={() => setMode("id")} className="text-sm text-[var(--ink-3)] underline">
             Didn&apos;t work? Pay with the UPI ID instead
           </button>
