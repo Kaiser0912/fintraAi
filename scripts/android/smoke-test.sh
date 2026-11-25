@@ -145,7 +145,14 @@ case "$enabled" in
   true) pass "Notification access can be turned on for Fintra";;
   *) bad "PaymentNotifications.isEnabled did not report true (got: '${enabled:-none}')";;
 esac
+info "app pid before post: $(adb shell pidof $PKG 2>/dev/null)"
 adb shell cmd notification post -S bigtext -t "Rs 150 paid to Riya" fintra_smoke "Payment successful" >/dev/null 2>&1
+sleep 3
+info "app pid after post: $(adb shell pidof $PKG 2>/dev/null)"
+info "listener: $(adb shell dumpsys notification 2>/dev/null | grep -m1 -o "$PKG/$PKG.PaymentNotificationListener[^ ]*" || echo 'not listed')"
+# The queue is stored on the phone; bring Fintra back to read it.
+adb shell am start -n "$PKG/.MainActivity" >/dev/null 2>&1
+wait_for_url "fintra" 30 >/dev/null
 got=""
 for i in $(seq 1 20); do
   got=$(page_eval "Capacitor.nativePromise('PaymentNotifications','getPending',{}).then(r => JSON.stringify(r.items))")
