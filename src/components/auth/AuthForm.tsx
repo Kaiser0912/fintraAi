@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Loader2, Eye, EyeOff, Mail, CheckCircle2 } from "lucide-react";
 import { createClient } from "@/utils/supabase/client";
-import { isNativeApp, NATIVE_AUTH_CALLBACK, openInSystemBrowser } from "@/lib/native";
+import { isNativeApp, openInSystemBrowser } from "@/lib/native";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -109,7 +109,9 @@ export function AuthForm({ mode }: { mode: Mode }) {
     if (isNativeApp()) {
       const { data, error } = await supabase.auth.signInWithOAuth({
         provider: "google",
-        options: { redirectTo: NATIVE_AUTH_CALLBACK, skipBrowserRedirect: true },
+        // Return to the website (already an allowed redirect); it hands the code
+        // to the app via com.fintra.app://auth/callback (see auth/callback route).
+        options: { redirectTo: `${window.location.origin}/auth/callback?native=1`, skipBrowserRedirect: true },
       });
       if (error || !data?.url) {
         setError(error?.message ?? "Could not start Google sign-in");
