@@ -7,6 +7,7 @@ import { RecurringSection } from "@/components/settings/RecurringSection"
 import { AiSettingsSection } from "@/components/settings/AiSettingsSection"
 import { DataSection } from "@/components/settings/DataSection"
 import { InstallSection } from "@/components/settings/InstallSection"
+import Link from "next/link"
 import { LogOut } from "lucide-react"
 
 export default function SettingsPage() {
@@ -49,6 +50,18 @@ export default function SettingsPage() {
 
         {/* Install as app (PWA) */}
         <InstallSection />
+
+        {/* Labs — test pages for features in progress (the app has no address bar) */}
+        <Section title="Labs">
+          <Row title="UPI link test" desc="Check which UPI apps accept payments started from Fintra.">
+            <Link
+              href="/labs/upi-test"
+              className="inline-flex min-h-11 items-center rounded-lg border border-[var(--hairline-strong)] px-4 text-sm font-medium text-[var(--ink)] transition-colors duration-150 hover:bg-[var(--surface-2)]"
+            >
+              Open
+            </Link>
+          </Row>
+        </Section>
 
         {/* Sign out */}
         <div className="border-t border-[var(--hairline)] pt-6">
