@@ -7,6 +7,7 @@ import { RecurringSection } from "@/components/settings/RecurringSection"
 import { AiSettingsSection } from "@/components/settings/AiSettingsSection"
 import { DataSection } from "@/components/settings/DataSection"
 import { InstallSection } from "@/components/settings/InstallSection"
+import { AutoLogSection } from "@/components/settings/AutoLogSection"
 import Link from "next/link"
 import { LogOut } from "lucide-react"
 
@@ -48,6 +49,9 @@ export default function SettingsPage() {
         {/* Data */}
         <DataSection />
 
+        {/* Auto-log UPI payments (Android app) */}
+        <AutoLogSection />
+
         {/* Install as app (PWA) */}
         <InstallSection />
 
@@ -56,6 +60,14 @@ export default function SettingsPage() {
           <Row title="UPI link test" desc="Check which UPI apps accept payments started from Fintra.">
             <Link
               href="/labs/upi-test"
+              className="inline-flex min-h-11 items-center rounded-lg border border-[var(--hairline-strong)] px-4 text-sm font-medium text-[var(--ink)] transition-colors duration-150 hover:bg-[var(--surface-2)]"
+            >
+              Open
+            </Link>
+          </Row>
+          <Row title="Captured notifications" desc="What auto-log saw from UPI apps, and how Fintra read it.">
+            <Link
+              href="/labs/notifications"
               className="inline-flex min-h-11 items-center rounded-lg border border-[var(--hairline-strong)] px-4 text-sm font-medium text-[var(--ink)] transition-colors duration-150 hover:bg-[var(--surface-2)]"
             >
               Open

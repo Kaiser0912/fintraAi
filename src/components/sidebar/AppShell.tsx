@@ -1,6 +1,7 @@
 "use client";
 
 import { PendingPaymentPrompt } from "@/components/pay/PendingPaymentPrompt";
+import { AutoLogPrompt } from "@/components/pay/AutoLogPrompt";
 import { Sidebar } from "@/components/sidebar/Sidebar";
 import { Header } from "@/components/sidebar/Header";
 import { BottomNav } from "@/components/sidebar/BottomNav";
@@ -28,6 +29,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <BottomNav />
         <RecurringCatchup />
         <PendingPaymentPrompt />
+        <AutoLogPrompt />
       </div>
     </QuickAddProvider>
   );
