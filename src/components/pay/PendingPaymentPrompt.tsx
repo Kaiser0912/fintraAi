@@ -5,7 +5,15 @@
 
 import { useCallback, useEffect, useState } from "react"
 import { usePathname, useRouter } from "next/navigation"
-import { clearPending, deletePayment, loadPending, markPaid, type PendingPayment } from "@/lib/payFlow"
+import {
+  PAY_FALLBACK_KEY,
+  clearPending,
+  deletePayment,
+  loadPending,
+  markPaid,
+  setQuickPayBlocked,
+  type PendingPayment,
+} from "@/lib/payFlow"
 import { clearPayDraft } from "@/lib/upiQr"
 
 export const PAY_DONE_KEY = "fintra-pay-done"
@@ -73,6 +81,18 @@ export function PendingPaymentPrompt() {
     try {
       await deletePayment(pending.txId)
       clearPending()
+      // A refused pre-filled payment or shop QR: remember it and reopen the
+      // pay screen on the copy-the-UPI-ID way.
+      const fallback =
+        pending.method === "quick" ? (pending.appLabel ?? "The UPI app") : pending.method === "shop" ? "shop" : null
+      if (fallback) {
+        if (pending.method === "quick" && pending.appId) setQuickPayBlocked(pending.appId, true)
+        try {
+          sessionStorage.setItem(PAY_FALLBACK_KEY, fallback)
+        } catch {}
+        if (pathname === "/pay/go") window.location.reload()
+        else router.push("/pay/go")
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Couldn't remove it. Try again.")
     } finally {
