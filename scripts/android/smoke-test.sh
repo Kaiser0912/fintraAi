@@ -112,23 +112,24 @@ esac
 act=$(top_activity)
 echo "$act" | grep -q "$PKG" && pass "deep link brought Fintra to the front" || bad "Fintra not in front after deep link: $act"
 
-echo "== website hand-off (Chrome -> app)"
+echo "== website hand-off (server redirect -> app)"
 HANDOFF="https://fintra-ai-xi.vercel.app/auth/callback?native=1&error_description=handoff%20test"
-if curl -s --max-time 20 "$HANDOFF" | grep -q "com.fintra.app://auth/callback"; then
-  # Skip Chrome's first-run screens on the emulator so the page actually loads.
-  adb shell 'echo "chrome --disable-fre --no-default-browser-check --no-first-run" > /data/local/tmp/chrome-command-line' 2>/dev/null
-  adb shell am set-debug-app --persistent com.android.chrome >/dev/null 2>&1
-  adb shell am force-stop com.android.chrome
-  adb shell am start -a android.intent.action.VIEW -d "$HANDOFF" com.android.chrome >/dev/null
-  url=$(wait_for_url "error=handoff" 45)
-  shot 5-after-handoff
-  case "$url" in
-    *"/sign-in?error=handoff"*) pass "website hand-off page in Chrome opens Fintra and passes the result ($url)";;
-    *) bad "hand-off from Chrome did not reach the app (WebView url: '${url:-none}'; top: $(top_activity))";;
-  esac
-else
-  info "live site has no native hand-off yet; skipping Chrome -> app check"
-fi
+loc=$(curl -s -o /dev/null -w "%{redirect_url}" --max-time 20 "$HANDOFF")
+case "$loc" in
+  intent://auth/callback*)
+    pass "live callback redirects the browser to the app intent"
+    # The intent Chrome would follow; drop the fallback so Android must open the app.
+    intent_uri=$(echo "$loc" | sed -E "s/S.browser_fallback_url=[^;]*;//")
+    adb shell "am start " >/dev/null 2>&1
+    url=$(wait_for_url "error=handoff" 40)
+    shot 5-after-handoff
+    case "$url" in
+      *"/sign-in?error=handoff"*) pass "redirect intent opens Fintra and the app gets the result ($url)";;
+      *) bad "redirect intent did not reach the app (WebView url: '${url:-none}'; top: $(top_activity))";;
+    esac
+    ;;
+  *) info "live site has no intent hand-off yet (redirect: '${loc:-none}'); skipping";;
+esac
 
 echo "== crashes"
 adb logcat -d -b crash > "$OUT/crash.txt" 2>/dev/null

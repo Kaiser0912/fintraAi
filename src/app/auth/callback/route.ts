@@ -17,7 +17,7 @@ export async function GET(request: Request) {
   const code = searchParams.get("code");
   const next = searchParams.get("next") ?? "/dashboard";
 
-  if (searchParams.get("native") === "1") return handOffToApp(searchParams);
+  if (searchParams.get("native") === "1") return handOffToApp(searchParams, origin);
 
   if (code) {
     const supabase = await createClient();
@@ -30,16 +30,24 @@ export async function GET(request: Request) {
   return NextResponse.redirect(`${origin}/sign-in?error=Could not sign you in`);
 }
 
-function handOffToApp(params: URLSearchParams) {
+function handOffToApp(params: URLSearchParams, origin: string) {
   const forward = new URLSearchParams();
   for (const key of ["code", "error", "error_description"]) {
     const v = params.get(key);
     if (v) forward.set(key, v);
   }
   const appUrl = `${APP_CALLBACK}?${forward.toString()}`;
-  // Chrome intent URL: opens the app even when a plain custom-scheme redirect
-  // is ignored, and falls back to nothing harmful if the app isn't installed.
   const intentUrl = `intent://auth/callback?${forward.toString()}#Intent;scheme=com.fintra.app;package=com.fintra.app;end`;
+
+  // First visit: redirect straight to the app as part of the OAuth redirect
+  // chain (Chrome allows opening an app here because the chain began with the
+  // user's tap; a later script redirect may be blocked). If the app can't be
+  // opened, Chrome loads the fallback page below with an "Open Fintra" button.
+  if (!params.has("show")) {
+    const fallback = `${origin}/auth/callback?native=1&show=1&${forward.toString()}`;
+    const redirectIntent = `intent://auth/callback?${forward.toString()}#Intent;scheme=com.fintra.app;package=com.fintra.app;S.browser_fallback_url=${encodeURIComponent(fallback)};end`;
+    return new NextResponse(null, { status: 302, headers: { Location: redirectIntent, "Cache-Control": "no-store" } });
+  }
   const safe = (s: string) => s.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
 
   const html = `<!doctype html>
