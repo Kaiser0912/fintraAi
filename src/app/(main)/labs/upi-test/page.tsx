@@ -9,7 +9,7 @@
 
 import { useEffect, useMemo, useState } from "react"
 
-type Target = "merchant" | "personal"
+type Target = "merchant" | "personal" | "qr"
 type Status = "" | "worked" | "blocked" | "error" | "not-installed"
 
 // pkg: Android package (used in Chrome via intent:// links).
@@ -40,6 +40,13 @@ function buildQuery(upiId: string, name: string, amount: string, note: string, w
   return q.toString()
 }
 
+/** The exact query from a scanned UPI QR (keeps mc, tr, sign… that verified merchants include). */
+function qrQuery(raw: string): string | null {
+  const t = raw.trim()
+  if (!t.toLowerCase().startsWith("upi://pay?")) return null
+  return t.slice(t.indexOf("?") + 1)
+}
+
 function linkFor(app: (typeof APPS)[number], query: string, inApp: boolean) {
   if (inApp || !app.pkg) return `${app.scheme}?${query}`
   return `intent://pay?${query}#Intent;scheme=upi;package=${app.pkg};end`
@@ -50,6 +57,7 @@ export default function UpiTestPage() {
     merchant: { upi: "", name: "" },
     personal: { upi: "", name: "" },
   })
+  const [qrText, setQrText] = useState("")
   const [amount, setAmount] = useState("1")
   const [note, setNote] = useState("Fintra UPI test")
   const [results, setResults] = useState<Record<string, Status>>({})
@@ -59,12 +67,13 @@ export default function UpiTestPage() {
     try {
       const saved = JSON.parse(localStorage.getItem(STORE) ?? "{}")
       if (saved.payees) setPayees(saved.payees)
+      if (saved.qrText) setQrText(saved.qrText)
       if (saved.results) setResults(saved.results)
     } catch {}
   }, [])
   useEffect(() => {
-    try { localStorage.setItem(STORE, JSON.stringify({ payees, results })) } catch {}
-  }, [payees, results])
+    try { localStorage.setItem(STORE, JSON.stringify({ payees, qrText, results })) } catch {}
+  }, [payees, qrText, results])
 
   // Known only in the browser; set after mount to keep server and client HTML identical.
   const [where, setWhere] = useState("Browser")
@@ -80,7 +89,7 @@ export default function UpiTestPage() {
       .filter(([, s]) => s)
       .map(([k, s]) => {
         const [w, t, app, am] = k.split("|")
-        return `| ${w} | ${t === "merchant" ? "Shop" : "Friend"} | ${APPS.find((a) => a.id === app)?.label ?? app} | ${am === "amount" ? "pre-filled" : "typed in app"} | ${STATUS_LABEL[s as Exclude<Status, "">]} |`
+        return `| ${w} | ${t === "merchant" ? "Shop" : t === "qr" ? "Shop QR (exact)" : "Friend"} | ${APPS.find((a) => a.id === app)?.label ?? app} | ${am === "amount" ? "pre-filled" : "typed in app"} | ${STATUS_LABEL[s as Exclude<Status, "">]} |`
       })
     return ["| Opened from | Payee | App | Amount | Result |", "|---|---|---|---|---|", ...rows].join("\n")
   }, [results])
@@ -109,7 +118,7 @@ export default function UpiTestPage() {
       </header>
 
       <section className="grid gap-4 rounded-xl border border-[var(--hairline)] p-4 sm:grid-cols-2">
-        {(["merchant", "personal"] as Target[]).map((t) => (
+        {(["merchant", "personal"] as ("merchant" | "personal")[]).map((t) => (
           <div key={t} className="space-y-2">
             <p className="text-sm font-medium text-[var(--ink)]">
               {t === "merchant" ? "Shop UPI ID (from a shop's QR)" : "Friend's UPI ID"}
@@ -152,7 +161,7 @@ export default function UpiTestPage() {
         </div>
       </section>
 
-      {(["merchant", "personal"] as Target[]).map((t) => {
+      {(["merchant", "personal"] as ("merchant" | "personal")[]).map((t) => {
         const ok = UPI_RE.test(payees[t].upi.trim())
         return (
           <section key={t} className="space-y-3">
@@ -191,6 +200,51 @@ export default function UpiTestPage() {
           </section>
         )
       })}
+
+      <section className="space-y-3">
+        <h2 className="text-lg font-semibold text-[var(--ink)]">Pay a shop&apos;s QR exactly as scanned</h2>
+        <p className="text-sm text-[var(--ink-2)]">
+          Real shop QRs carry verified merchant details that a rebuilt link drops. Scan a shop&apos;s QR with Google Lens
+          (or any QR reader), copy the text that starts with <code>upi://pay?</code>, and paste it here. The amount is
+          whatever the QR has (you type it in the UPI app if it has none).
+        </p>
+        <textarea
+          className="min-h-20 w-full rounded-lg border border-[var(--hairline)] bg-transparent px-3 py-2 text-xs"
+          placeholder="upi://pay?pa=shop@ybl&pn=Shop%20Name&mc=5411&tr=...&sign=..."
+          value={qrText}
+          onChange={(e) => setQrText(e.target.value)}
+          autoCapitalize="none"
+          autoCorrect="off"
+        />
+        {qrText && !qrQuery(qrText) && (
+          <p className="text-xs text-[var(--neg)]">Paste the full text starting with upi://pay?</p>
+        )}
+        {qrQuery(qrText) &&
+          APPS.map((app) => {
+            const k = key("qr", app.id, false)
+            return (
+              <div key={app.id} className="flex flex-wrap items-center gap-2 rounded-xl border border-[var(--hairline)] p-3">
+                <span className="min-w-28 text-sm font-medium text-[var(--ink)]">{app.label}</span>
+                <a
+                  href={linkFor(app, qrQuery(qrText) as string, where === "Fintra app")}
+                  className="rounded-lg bg-[var(--accent,#2e5f4c)] px-3 py-2 text-sm font-medium text-white"
+                >
+                  Pay this QR
+                </a>
+                <select
+                  className="rounded-lg border border-[var(--hairline)] bg-transparent px-2 py-2 text-sm"
+                  value={results[k] ?? ""}
+                  onChange={(e) => setResults({ ...results, [k]: e.target.value as Status })}
+                >
+                  <option value="">Result…</option>
+                  {Object.entries(STATUS_LABEL).map(([v, l]) => (
+                    <option key={v} value={v}>{l}</option>
+                  ))}
+                </select>
+              </div>
+            )
+          })}
+      </section>
 
       <section className="space-y-2">
         <h2 className="text-lg font-semibold text-[var(--ink)]">Results</h2>
