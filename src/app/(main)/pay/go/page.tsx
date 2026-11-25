@@ -2,31 +2,42 @@
 
 // Scan to pay — step 3 (FIN-24/28). Hands the payment to a UPI app.
 //  - verified shop QR: the QR goes to the UPI app exactly as scanned
-//  - friend / small shop: copy the UPI ID, open the UPI app, pay there
+//  - friend / small shop: "quick pay" opens the UPI app with payee and amount
+//    filled in; if that app refuses (NPCI lets it), we remember and fall back
+//    to copy the UPI ID → open the UPI app → pay there
 // The payment is saved as pending first; PendingPaymentPrompt asks
 // "Did it go through?" when you come back.
 
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
-import { ArrowLeft, Check, Copy, ExternalLink } from "lucide-react"
+import { ArrowLeft, Check, Copy, ExternalLink, Zap } from "lucide-react"
 import { loadPayDraft, looksLikeMerchant, type PayDraft } from "@/lib/upiQr"
 import {
+  PAY_FALLBACK_KEY,
   UPI_APPS,
+  clearQuickPayBlocked,
   copyText,
   createPendingPayment,
   loadPending,
+  openQuickPay,
   openShopQr,
   openUpiApp,
+  quickPayBlocked,
   savePending,
+  type PendingPayment,
   type UpiApp,
 } from "@/lib/payFlow"
 
 const inr = (n: number) => `₹${n.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`
 
+type Mode = "shop" | "quick" | "id"
+
 export default function PayGoPage() {
   const router = useRouter()
   const [draft, setDraft] = useState<PayDraft | null>(null)
-  const [mode, setMode] = useState<"shop" | "id">("id")
+  const [mode, setMode] = useState<Mode>("id")
+  const [blocked, setBlocked] = useState<string[]>([])
+  const [fallbackNote, setFallbackNote] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
@@ -39,7 +50,26 @@ export default function PayGoPage() {
       return
     }
     setDraft(d)
-    setMode(looksLikeMerchant(d.target) && d.target.raw ? "shop" : "id")
+    const b = quickPayBlocked()
+    setBlocked(b)
+
+    // Coming back after a failed hand-off: open on the copy-the-UPI-ID way.
+    let fallback: string | null = null
+    try {
+      fallback = sessionStorage.getItem(PAY_FALLBACK_KEY)
+      sessionStorage.removeItem(PAY_FALLBACK_KEY)
+    } catch {}
+    if (fallback) {
+      setFallbackNote(
+        fallback === "shop"
+          ? "The shop's QR didn't go through. Pay with the UPI ID instead:"
+          : `${fallback} refused the pre-filled payment (UPI rules for personal IDs and small shops). Pay inside the app instead:`
+      )
+      setMode("id")
+      return
+    }
+    if (looksLikeMerchant(d.target) && d.target.raw) setMode("shop")
+    else setMode(UPI_APPS.every((a) => b.includes(a.id)) ? "id" : "quick")
   }, [router])
 
   if (!draft) return <div className="mx-auto max-w-md px-5 pt-6" />
@@ -48,49 +78,59 @@ export default function PayGoPage() {
   const amount = draft.amount as number
   const name = draft.payeeName || t.name || t.upiId
   const qrHasAmount = t.amount != null
+  const quickApps = UPI_APPS.filter((a) => !blocked.includes(a.id))
 
   /** Saves the pending payment once; later taps reuse it. */
-  async function ensurePending() {
+  async function handOff(how: Pick<PendingPayment, "method" | "appId" | "appLabel">) {
     const existing = loadPending()
-    if (existing && existing.upiId === t.upiId && existing.amount === amount) return existing
-    const p = await createPendingPayment(draft as PayDraft)
-    savePending(p)
-    return p
+    const p =
+      existing && existing.upiId === t.upiId && existing.amount === amount
+        ? existing
+        : await createPendingPayment(draft as PayDraft)
+    savePending({ ...p, ...how, handedOffAt: Date.now() })
   }
 
-  async function payShop() {
+  async function run(fn: () => Promise<void>) {
     setBusy(true)
     setError(null)
+    setManualApp(null)
     try {
-      const p = await ensurePending()
-      savePending({ ...p, handedOffAt: Date.now() })
-      openShopQr(t.raw as string)
+      await fn()
     } catch (e) {
       setError(e instanceof Error ? e.message : "Couldn't start the payment.")
     } finally {
       setBusy(false)
     }
   }
+
+  const payShop = () =>
+    run(async () => {
+      await handOff({ method: "shop" })
+      openShopQr(t.raw as string)
+    })
+
+  const quickPay = (app: UpiApp) =>
+    run(async () => {
+      await handOff({ method: "quick", appId: app.id, appLabel: app.label })
+      openQuickPay(app, { upiId: t.upiId, name, amount, note: draft.purpose })
+    })
+
+  const openApp = (app: UpiApp) =>
+    run(async () => {
+      setCopied(await copyText(t.upiId))
+      await handOff({ method: "copy", appId: app.id, appLabel: app.label })
+      if (!(await openUpiApp(app))) setManualApp(app.label)
+    })
 
   async function onCopy() {
     setCopied(await copyText(t.upiId))
   }
 
-  async function openApp(app: UpiApp) {
-    setBusy(true)
-    setError(null)
-    setManualApp(null)
-    try {
-      setCopied(await copyText(t.upiId))
-      const p = await ensurePending()
-      savePending({ ...p, handedOffAt: Date.now() })
-      const opened = await openUpiApp(app)
-      if (!opened) setManualApp(app.label)
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Couldn't start the payment.")
-    } finally {
-      setBusy(false)
-    }
+  function retryQuick() {
+    clearQuickPayBlocked()
+    setBlocked([])
+    setFallbackNote(null)
+    setMode("quick")
   }
 
   return (
@@ -122,7 +162,7 @@ export default function PayGoPage() {
         </p>
       )}
 
-      {mode === "shop" ? (
+      {mode === "shop" && (
         <section className="space-y-3">
           <button
             onClick={payShop}
@@ -141,8 +181,45 @@ export default function PayGoPage() {
             Didn&apos;t work? Pay with the UPI ID instead
           </button>
         </section>
-      ) : (
+      )}
+
+      {mode === "quick" && (
+        <section className="space-y-3">
+          <div className="rounded-2xl border border-[var(--hairline)] p-4">
+            <p className="flex items-center gap-2 text-sm font-medium text-[var(--ink)]">
+              <Zap className="h-4 w-4" aria-hidden />
+              Pay with the amount filled in
+            </p>
+            <p className="mt-1 text-xs text-[var(--ink-3)]">
+              Opens the app with {name} and {inr(amount)} ready. Some apps refuse this for personal UPI IDs; if yours
+              does, no money moves and Fintra switches to the other way.
+            </p>
+            <div className="mt-3 grid grid-cols-2 gap-2">
+              {quickApps.map((app) => (
+                <button
+                  key={app.id}
+                  onClick={() => quickPay(app)}
+                  disabled={busy}
+                  className="min-h-11 rounded-xl bg-[var(--brand)] px-3 text-sm font-semibold text-[var(--primary-foreground)] disabled:opacity-50"
+                >
+                  {app.label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <button onClick={() => setMode("id")} className="text-sm text-[var(--ink-3)] underline">
+            Pay with the UPI ID instead
+          </button>
+        </section>
+      )}
+
+      {mode === "id" && (
         <section className="space-y-4">
+          {fallbackNote && (
+            <p role="status" className="rounded-xl bg-[var(--surface-2)] px-4 py-3 text-sm text-[var(--ink-2)]">
+              {fallbackNote}
+            </p>
+          )}
           <ol className="space-y-4">
             <li className="rounded-2xl border border-[var(--hairline)] p-4">
               <p className="text-sm font-medium text-[var(--ink)]">1. Copy the UPI ID</p>
@@ -181,11 +258,18 @@ export default function PayGoPage() {
               )}
             </li>
           </ol>
-          {looksLikeMerchant(t) && t.raw && (
-            <button onClick={() => setMode("shop")} className="text-sm text-[var(--ink-3)] underline">
-              Use the shop&apos;s QR instead
-            </button>
-          )}
+          <div className="flex flex-wrap gap-x-4 gap-y-2">
+            {looksLikeMerchant(t) && t.raw && (
+              <button onClick={() => setMode("shop")} className="text-sm text-[var(--ink-3)] underline">
+                Use the shop&apos;s QR instead
+              </button>
+            )}
+            {!(looksLikeMerchant(t) && t.raw) && (
+              <button onClick={retryQuick} className="text-sm text-[var(--ink-3)] underline">
+                Try with the amount filled in
+              </button>
+            )}
+          </div>
         </section>
       )}
 

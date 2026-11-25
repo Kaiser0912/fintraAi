@@ -18,11 +18,57 @@ import { isNativeApp } from "@/lib/native"
 import type { PayDraft } from "@/lib/upiQr"
 
 export const UPI_APPS = [
-  { id: "gpay", label: "Google Pay", pkg: "com.google.android.apps.nbu.paisa.user" },
-  { id: "phonepe", label: "PhonePe", pkg: "com.phonepe.app" },
-  { id: "paytm", label: "Paytm", pkg: "net.one97.paytm" },
-  { id: "bhim", label: "BHIM", pkg: "in.org.npci.upiapp" },
+  // scheme: the app's own pay link, used inside the Fintra app (its WebView
+  // opens links with a plain VIEW intent and can't follow intent:// links).
+  { id: "gpay", label: "Google Pay", pkg: "com.google.android.apps.nbu.paisa.user", scheme: "tez://upi/pay" },
+  { id: "phonepe", label: "PhonePe", pkg: "com.phonepe.app", scheme: "phonepe://pay" },
+  { id: "paytm", label: "Paytm", pkg: "net.one97.paytm", scheme: "paytmmp://pay" },
+  { id: "bhim", label: "BHIM", pkg: "in.org.npci.upiapp", scheme: "upi://pay" },
 ] as const
+
+// ─── Pre-filled payments ("quick pay") ───────────────────────────────────────
+// Opens the UPI app with payee and amount filled in. NPCI lets apps refuse
+// these for personal IDs and small shops, so when one fails we remember that
+// app and go straight to copy-the-UPI-ID next time.
+
+const BLOCKED_KEY = "fintra-quickpay-blocked"
+
+export function quickPayBlocked(): string[] {
+  try {
+    return JSON.parse(localStorage.getItem(BLOCKED_KEY) ?? "[]")
+  } catch {
+    return []
+  }
+}
+
+export function setQuickPayBlocked(appId: string, blocked: boolean) {
+  const set = new Set(quickPayBlocked())
+  if (blocked) set.add(appId)
+  else set.delete(appId)
+  try {
+    localStorage.setItem(BLOCKED_KEY, JSON.stringify([...set]))
+  } catch {}
+}
+
+export function clearQuickPayBlocked() {
+  try {
+    localStorage.removeItem(BLOCKED_KEY)
+  } catch {}
+}
+
+/** Hands the UPI app a payment with payee and amount filled in. */
+export function openQuickPay(app: UpiApp, p: { upiId: string; name: string; amount: number; note?: string | null }) {
+  const q = new URLSearchParams({ pa: p.upiId, pn: p.name.slice(0, 50), am: p.amount.toFixed(2), cu: "INR" })
+  if (p.note) q.set("tn", p.note.slice(0, 50))
+  const query = q.toString()
+  if (isNativeApp()) window.location.href = `${app.scheme}?${query}`
+  else if (/Android/i.test(navigator.userAgent))
+    window.location.href = `intent://pay?${query}#Intent;scheme=upi;package=${app.pkg};end`
+  else window.location.href = `upi://pay?${query}`
+}
+
+/** Set when a hand-off failed, so the pay screen opens on the fallback. */
+export const PAY_FALLBACK_KEY = "fintra-pay-fallback"
 
 export type UpiApp = (typeof UPI_APPS)[number]
 
@@ -39,6 +85,10 @@ export interface PendingPayment {
   categoryName: string | null
   /** When you left for the UPI app. */
   handedOffAt: number
+  /** How it was handed off; a failed "quick" pay blocks that app. */
+  method?: "shop" | "quick" | "copy"
+  appId?: string
+  appLabel?: string
 }
 
 export function savePending(p: PendingPayment) {
