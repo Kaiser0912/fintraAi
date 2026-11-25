@@ -29,6 +29,25 @@ function alreadyHandled(token: string): boolean {
   return false
 }
 
+/**
+ * Full-screen brand cover shown while the app navigates on its own (finishing
+ * sign-in, skipping the start page), so the user never sees the page underneath
+ * flash. Plain DOM so it appears instantly, before React or the next page.
+ */
+function showCover(text: string) {
+  if (document.getElementById("fintra-native-cover")) return
+  const el = document.createElement("div")
+  el.id = "fintra-native-cover"
+  el.setAttribute("role", "status")
+  el.style.cssText =
+    "position:fixed;inset:0;z-index:2147483647;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;" +
+    "background:var(--paper,#f7f4ec);color:var(--ink,#1f2a24);font:500 15px system-ui,-apple-system,sans-serif"
+  el.innerHTML =
+    '<div style="width:28px;height:28px;border-radius:50%;border:3px solid currentColor;border-right-color:transparent;opacity:.6;animation:fintra-spin .8s linear infinite"></div>' +
+    `<div>${text}</div><style>@keyframes fintra-spin{to{transform:rotate(360deg)}}</style>`
+  document.body.appendChild(el)
+}
+
 /** Returns true when it navigated away to finish (or report) a sign-in. */
 async function finishFromLink(url: string | undefined | null): Promise<boolean> {
   if (!url || !url.startsWith(NATIVE_AUTH_CALLBACK)) return false
@@ -36,6 +55,7 @@ async function finishFromLink(url: string | undefined | null): Promise<boolean> 
   const code = params.get("code")
   const errorText = params.get("error_description") ?? params.get("error")
   if (alreadyHandled(code ?? errorText ?? url)) return false
+  if (code) showCover("Signing you in…")
 
   const { Browser } = await import("@capacitor/browser")
   await Browser.close().catch(() => {})
@@ -62,6 +82,7 @@ export function NativeAuthBridge() {
       if (await finishFromLink(launch?.url)) return
 
       if (window.location.pathname === "/") {
+        showCover("Opening Fintra…")
         window.location.replace("/dashboard")
         return
       }
