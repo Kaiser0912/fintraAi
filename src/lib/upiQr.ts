@@ -66,13 +66,20 @@ const DRAFT_KEY = "fintra-pay-draft"
 
 export interface PayDraft {
   target: UpiTarget
-  /** Filled on the amount step. */
+  /** Filled on the details step (FIN-14/19). `amount` is the whole bill you pay. */
   amount?: number | null
   purpose?: string | null
+  payeeName?: string | null
+  categoryId?: string | null
+  categoryName?: string | null
+  /** Split with friends: you pay the whole bill, your share is what counts. */
+  split?: { people: number; share: number } | null
   createdAt: number
 }
 
-export function savePayDraft(target: UpiTarget, details: Pick<PayDraft, "amount" | "purpose"> = {}) {
+export type PayDetails = Omit<PayDraft, "target" | "createdAt">
+
+export function savePayDraft(target: UpiTarget, details: PayDetails = {}) {
   try {
     sessionStorage.setItem(DRAFT_KEY, JSON.stringify({ target, ...details, createdAt: Date.now() } satisfies PayDraft))
   } catch {}
