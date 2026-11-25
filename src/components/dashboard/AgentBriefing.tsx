@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from "react";
 import Link from "next/link";
-import { ArrowRight, Plus } from "lucide-react";
+import { ArrowRight, Plus, ScanLine } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useDashboardStore } from "@/store/dashboardStore";
 import { useQuickAdd } from "@/components/common/QuickAddProvider";
@@ -124,6 +124,10 @@ export function AgentBriefing() {
               <Plus className="h-4 w-4" aria-hidden />
               Add a transaction
             </ActionButton>
+            <ActionButton href="/pay">
+              <ScanLine className="h-4 w-4" aria-hidden />
+              Scan &amp; pay
+            </ActionButton>
             <ActionButton
               onClick={() => askAssistant("What can you help me with?")}
             >
@@ -169,6 +173,10 @@ export function AgentBriefing() {
             >
               Ask Fintra about this
               <ArrowRight className="h-4 w-4" aria-hidden />
+            </ActionButton>
+            <ActionButton href="/pay">
+              <ScanLine className="h-4 w-4" aria-hidden />
+              Scan &amp; pay
             </ActionButton>
             {isBudgetSignal ? (
               <ActionButton href="#budgets">Review budgets</ActionButton>
