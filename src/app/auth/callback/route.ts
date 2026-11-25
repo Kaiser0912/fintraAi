@@ -19,15 +19,21 @@ export async function GET(request: Request) {
 
   if (searchParams.get("native") === "1") return handOffToApp(searchParams, origin);
 
+  let reason = searchParams.get("error_description") ?? searchParams.get("error") ?? "no sign-in code was returned";
   if (code) {
     const supabase = await createClient();
     const { error } = await supabase.auth.exchangeCodeForSession(code);
     if (!error) {
       return NextResponse.redirect(`${origin}${next}`);
     }
+    reason = error.message;
+    // Never log the code or cookies; the message and code name are enough.
+    console.error("[auth/callback] code exchange failed:", error.code ?? "", error.message);
+  } else {
+    console.error("[auth/callback] no code:", reason);
   }
 
-  return NextResponse.redirect(`${origin}/sign-in?error=Could not sign you in`);
+  return NextResponse.redirect(`${origin}/sign-in?error=${encodeURIComponent(`Could not sign you in: ${reason}`)}`);
 }
 
 function handOffToApp(params: URLSearchParams, origin: string) {

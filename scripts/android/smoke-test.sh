@@ -118,9 +118,14 @@ loc=$(curl -s -o /dev/null -w "%{redirect_url}" --max-time 20 "$HANDOFF")
 case "$loc" in
   intent://auth/callback*)
     pass "live callback redirects the browser to the app intent"
-    # The intent Chrome would follow; drop the fallback so Android must open the app.
-    intent_uri=$(echo "$loc" | sed -E "s/S.browser_fallback_url=[^;]*;//")
-    adb shell "am start " >/dev/null 2>&1
+    # Launch exactly what Chrome derives from the intent URL: a VIEW of
+    # <scheme>://auth/callback?<query>, restricted to <package>.
+    query=$(echo "$loc" | sed -E 's|^intent://auth/callback\?([^#]*)#.*|\1|')
+    scheme=$(echo "$loc" | grep -o 'scheme=[^;]*' | cut -d= -f2)
+    package=$(echo "$loc" | grep -o 'package=[^;]*' | cut -d= -f2)
+    info "intent -> scheme=$scheme package=$package query=$query"
+    am_out=$(adb shell am start -W -a android.intent.action.VIEW -d "\"$scheme://auth/callback?$query\"" -p "$package" 2>&1 | tr '\n' ' ')
+    info "am: $am_out"
     url=$(wait_for_url "error=handoff" 40)
     shot 5-after-handoff
     case "$url" in
@@ -129,6 +134,18 @@ case "$loc" in
     esac
     ;;
   *) info "live site has no intent hand-off yet (redirect: '${loc:-none}'); skipping";;
+esac
+
+echo "== cold start via sign-in link (Android restarted the app)"
+adb shell am force-stop "$PKG"
+sleep 2
+adb shell am start -W -a android.intent.action.VIEW \
+  -d "com.fintra.app://auth/callback?error_description=coldstart%20test" -p "$PKG" >/dev/null 2>&1
+url=$(wait_for_url "error=coldstart" 60)
+shot 6-cold-start
+case "$url" in
+  *"/sign-in?error=coldstart"*) pass "sign-in link that cold-starts the app is still handled ($url)";;
+  *) bad "cold-start sign-in link was lost (WebView url: '${url:-none}')";;
 esac
 
 echo "== crashes"
