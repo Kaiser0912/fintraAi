@@ -162,7 +162,12 @@ done
 shot 6a-autolog
 case "$got" in
   *"paid to Riya"*) pass "captured a payment notification ($got)";;
-  *) bad "payment notification was not captured (got: '${got:-none}')";;
+  *)
+    bad "payment notification was not captured (got: '${got:-none}')"
+    info "top: $(top_activity)"
+    info "raw eval: $(forward_devtools && $CDP eval "Capacitor.nativePromise('PaymentNotifications','getPending',{}).then(r => JSON.stringify(r.items), e => 'ERR ' + e.message)" 2>&1 | head -c 400)"
+    adb logcat -d > "$OUT/logcat-autolog.txt" 2>/dev/null
+    ;;
 esac
 
 echo "== cold start via sign-in link (Android restarted the app)"
