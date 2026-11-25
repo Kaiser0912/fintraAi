@@ -91,7 +91,7 @@ export default function PayDetailsPage() {
   const t = draft.target
   const merchant = looksLikeMerchant(t)
   const displayName = suggest?.payee?.name ?? t.name ?? t.upiId
-  const qrFixedAmount = merchant && t.amount != null
+  const qrAmount = merchant ? t.amount : null
   const amountNum = Number(amount)
   const amountOk = Number.isFinite(amountNum) && amountNum > 0 && amountNum <= MAX_AMOUNT
   const evenShare = amountOk ? round2(amountNum / people) : 0
@@ -155,14 +155,15 @@ export default function PayDetailsPage() {
             <input
               inputMode="decimal"
               value={amount}
-              readOnly={qrFixedAmount}
               onChange={(e) => setAmount(e.target.value.replace(/[^\d.]/g, ""))}
               placeholder="0"
               autoFocus={!amount}
               className="tnum w-full bg-transparent text-2xl font-semibold text-[var(--ink)] outline-none"
             />
           </div>
-          {qrFixedAmount && <span className="text-xs text-[var(--ink-3)]">Amount set by the shop&apos;s QR.</span>}
+          {qrAmount != null && amountNum !== qrAmount && (
+            <span className="text-xs text-[var(--ink-3)]">The shop&apos;s QR asks for ₹{qrAmount.toLocaleString("en-IN")}.</span>
+          )}
           {amountNum > MAX_AMOUNT && <span className="text-xs text-[var(--neg)]">UPI allows up to ₹1,00,000 per payment.</span>}
         </label>
 

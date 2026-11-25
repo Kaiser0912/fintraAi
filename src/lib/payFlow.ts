@@ -56,9 +56,14 @@ export function clearQuickPayBlocked() {
   } catch {}
 }
 
+/** UPI amount text: "1" for whole rupees, "1.50" otherwise. */
+export function upiAmount(n: number): string {
+  return Number.isInteger(n) ? String(n) : n.toFixed(2)
+}
+
 /** Hands the UPI app a payment with payee and amount filled in. */
 export function openQuickPay(app: UpiApp, p: { upiId: string; name: string; amount: number; note?: string | null }) {
-  const q = new URLSearchParams({ pa: p.upiId, pn: p.name.slice(0, 50), am: p.amount.toFixed(2), cu: "INR" })
+  const q = new URLSearchParams({ pa: p.upiId, pn: p.name.slice(0, 50), am: upiAmount(p.amount), cu: "INR" })
   if (p.note) q.set("tn", p.note.slice(0, 50))
   const query = q.toString()
   if (isNativeApp()) window.location.href = `${app.scheme}?${query}`
@@ -182,10 +187,21 @@ export async function deletePayment(txId: string) {
 
 // ─── Opening the UPI app ─────────────────────────────────────────────────────
 
-/** Hands a verified shop's QR to the UPI app exactly as scanned. */
-export function openShopQr(raw: string) {
+/**
+ * Hands a verified shop's QR to the UPI app as scanned. If you changed the
+ * amount, only `am` is replaced; every other field is kept.
+ */
+export function openShopQr(raw: string, amount?: number) {
   const t = raw.trim()
-  const query = t.slice(t.indexOf("?") + 1)
+  let query = t.slice(t.indexOf("?") + 1)
+  if (amount != null) {
+    const q = new URLSearchParams(query)
+    const qrAm = Number(q.get("am"))
+    if (!q.has("am") || qrAm !== amount) {
+      q.set("am", upiAmount(amount))
+      query = q.toString()
+    }
+  }
   window.location.href = `upi://pay?${query}`
 }
 
