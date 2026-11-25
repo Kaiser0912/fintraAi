@@ -136,6 +136,18 @@ case "$loc" in
   *) info "live site has no intent hand-off yet (redirect: '${loc:-none}'); skipping";;
 esac
 
+echo "== cold start via sign-in link (Android restarted the app)"
+adb shell am force-stop "$PKG"
+sleep 2
+adb shell am start -W -a android.intent.action.VIEW \
+  -d "com.fintra.app://auth/callback?error_description=coldstart%20test" -p "$PKG" >/dev/null 2>&1
+url=$(wait_for_url "error=coldstart" 60)
+shot 6-cold-start
+case "$url" in
+  *"/sign-in?error=coldstart"*) pass "sign-in link that cold-starts the app is still handled ($url)";;
+  *) bad "cold-start sign-in link was lost (WebView url: '${url:-none}')";;
+esac
+
 echo "== crashes"
 adb logcat -d -b crash > "$OUT/crash.txt" 2>/dev/null
 if grep -q "$PKG" "$OUT/crash.txt"; then bad "app crashed (see crash.txt)"; grep -m5 -A5 "$PKG" "$OUT/crash.txt" | tee -a "$RESULTS"; else pass "no app crashes"; fi
