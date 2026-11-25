@@ -25,6 +25,8 @@ export function Header() {
   if (pathname.includes("transactions")) title = "Transactions";
   else if (pathname.includes("settings")) title = "Settings";
   else if (pathname.includes("chat")) title = "Chat";
+  else if (pathname.startsWith("/pay")) title = "Pay";
+  else if (pathname.startsWith("/labs")) title = "Labs";
 
   const { firstName } = getUserDisplay(user);
 
