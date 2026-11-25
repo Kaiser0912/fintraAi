@@ -118,9 +118,14 @@ loc=$(curl -s -o /dev/null -w "%{redirect_url}" --max-time 20 "$HANDOFF")
 case "$loc" in
   intent://auth/callback*)
     pass "live callback redirects the browser to the app intent"
-    # The intent Chrome would follow; drop the fallback so Android must open the app.
-    intent_uri=$(echo "$loc" | sed -E "s/S.browser_fallback_url=[^;]*;//")
-    adb shell "am start " >/dev/null 2>&1
+    # Launch exactly what Chrome derives from the intent URL: a VIEW of
+    # <scheme>://auth/callback?<query>, restricted to <package>.
+    query=$(echo "$loc" | sed -E 's|^intent://auth/callback\?([^#]*)#.*|\1|')
+    scheme=$(echo "$loc" | grep -o 'scheme=[^;]*' | cut -d= -f2)
+    package=$(echo "$loc" | grep -o 'package=[^;]*' | cut -d= -f2)
+    info "intent -> scheme=$scheme package=$package query=$query"
+    am_out=$(adb shell am start -W -a android.intent.action.VIEW -d "\"$scheme://auth/callback?$query\"" -p "$package" 2>&1 | tr '\n' ' ')
+    info "am: $am_out"
     url=$(wait_for_url "error=handoff" 40)
     shot 5-after-handoff
     case "$url" in
