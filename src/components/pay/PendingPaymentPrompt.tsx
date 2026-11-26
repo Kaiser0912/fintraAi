@@ -60,7 +60,7 @@ export function PendingPaymentPrompt() {
       if (notice) {
         try {
           await confirm(p)
-          await forgetCaptured([notice.id])
+          await forgetCaptured(notice.ids)
           return
         } catch {
           // fall through to asking
@@ -98,7 +98,7 @@ export function PendingPaymentPrompt() {
       await confirm(pending)
       // The UPI app's notification for this payment is now handled too.
       const notice = await confirmationFor(pending)
-      if (notice) await forgetCaptured([notice.id])
+      if (notice) await forgetCaptured(notice.ids)
     } catch (e) {
       setError(e instanceof Error ? e.message : "Couldn't save. Try again.")
     } finally {

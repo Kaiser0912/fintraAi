@@ -8,7 +8,12 @@
 
 import { registerPlugin, type PluginListenerHandle } from "@capacitor/core"
 import { isNativeApp } from "@/lib/native"
-import { parseUpiNotification, type RawUpiNotification, type UpiPaymentNotice } from "@/lib/upiNotifications"
+import {
+  collapseDuplicates,
+  parseUpiNotification,
+  type RawUpiNotification,
+  type UpiPaymentNotice,
+} from "@/lib/upiNotifications"
 import type { PendingPayment } from "@/lib/payFlow"
 
 interface PaymentNotificationsPlugin {
@@ -53,13 +58,14 @@ export async function capturedRaw(): Promise<RawUpiNotification[]> {
   }
 }
 
-/** Captured payments you made, oldest first. */
-export async function capturedPayments(): Promise<UpiPaymentNotice[]> {
+/** A captured payment; `ids` are all queue items it stands for (app notification + bank SMS). */
+export type CapturedPayment = UpiPaymentNotice & { ids: string[] }
+
+/** Captured payments you made, oldest first, one per payment. */
+export async function capturedPayments(): Promise<CapturedPayment[]> {
   const raw = await capturedRaw()
-  return raw
-    .map(parseUpiNotification)
-    .filter((n): n is UpiPaymentNotice => n !== null)
-    .sort((a, b) => a.postedAt - b.postedAt)
+  const parsed = raw.map(parseUpiNotification).filter((n): n is UpiPaymentNotice => n !== null)
+  return collapseDuplicates(parsed).map((g) => ({ ...g.notice, ids: g.ids }))
 }
 
 /** Drops handled items (logged, skipped or matched) from the phone's queue. */
@@ -84,7 +90,7 @@ export function matchesPending(n: UpiPaymentNotice, p: PendingPayment): boolean 
 }
 
 /** Notice for the payment Fintra handed off, if the UPI app already confirmed it. */
-export async function confirmationFor(p: PendingPayment): Promise<UpiPaymentNotice | null> {
+export async function confirmationFor(p: PendingPayment): Promise<CapturedPayment | null> {
   const list = await capturedPayments()
   return list.find((n) => matchesPending(n, p)) ?? null
 }
