@@ -36,7 +36,7 @@ export function AutoLogSection() {
             {support === "web" && "Available in the Fintra Android app."}
             {support === "update-app" && "Install the latest Fintra app to use this."}
             {support === "ready" &&
-              "Fintra reads payment notifications from Google Pay, PhonePe, Paytm and BHIM on your phone and asks before logging. Other apps' notifications are ignored, and nothing is sent until you tap Log."}
+              "Fintra spots payments in Google Pay, PhonePe, Paytm and BHIM notifications and in bank debit SMS, on your phone, and asks before logging. OTP messages and other apps are ignored, and nothing is sent until you tap Log."}
           </p>
         </div>
         {support === "ready" && (

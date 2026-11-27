@@ -162,7 +162,22 @@ for i in $(seq 1 20); do
 done
 shot 6a-autolog
 case "$got" in
-  *"paid to Riya"*) pass "captured a payment notification ($got)";;
+  *"paid to Riya"*)
+    pass "captured a payment notification ($got)"
+    # Bank-SMS style text with a multi-line body, and an OTP that must never be kept.
+    adb shell "cmd notification post -S bigtext -t 'VM-HDFCBK' fintra_sms 'Sent Rs.1.00 From HDFC Bank A/C *1234 To RIYA KUMAR On 27/11/26 Ref 432112345678'" >/dev/null 2>&1
+    adb shell "cmd notification post -S bigtext -t 'VM-HDFCBK' fintra_otp '123456 is the OTP for txn of INR 500.00 at AMAZON. Do not share OTP'" >/dev/null 2>&1
+    sleep 4
+    got2=$(page_eval "Capacitor.nativePromise('PaymentNotifications','getPending',{}).then(r => JSON.stringify(r.items))")
+    case "$got2" in
+      *"To RIYA KUMAR"*) pass "captured a bank-SMS style notification";;
+      *) bad "bank-SMS style notification not captured (got: '${got2:-none}')";;
+    esac
+    case "$got2" in
+      *"OTP"*) bad "an OTP notification was stored";;
+      *) pass "OTP notification was not stored";;
+    esac
+    ;;
   *)
     bad "payment notification was not captured (got: '${got:-none}')"
     info "top: $(top_activity)"

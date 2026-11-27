@@ -14,7 +14,7 @@ import {
   onCaptured,
 } from "@/lib/autoLog"
 import { loadPending } from "@/lib/payFlow"
-import type { UpiPaymentNotice } from "@/lib/upiNotifications"
+import type { CapturedPayment } from "@/lib/autoLog"
 
 interface Category {
   id: string
@@ -46,7 +46,7 @@ function timeLabel(ms: number) {
 }
 
 export function AutoLogPrompt() {
-  const [queue, setQueue] = useState<UpiPaymentNotice[]>([])
+  const [queue, setQueue] = useState<CapturedPayment[]>([])
   const [categories, setCategories] = useState<Category[]>([])
   const [payees, setPayees] = useState<Payee[]>([])
   const [categoryId, setCategoryId] = useState<string | null>(null)
@@ -127,7 +127,7 @@ export function AutoLogPrompt() {
 
   async function skip() {
     if (!current) return
-    await forgetCaptured([current.id])
+    await forgetCaptured(current.ids)
     setQueue((q) => q.slice(1))
   }
 
@@ -158,7 +158,7 @@ export function AutoLogPrompt() {
         body: JSON.stringify(body),
       })
       if (!res.ok) throw new Error((await res.json().catch(() => null))?.message ?? `Error ${res.status}`)
-      await forgetCaptured([current.id])
+      await forgetCaptured(current.ids)
       setQueue((q) => q.slice(1))
       setLogged(`Logged ${inr(current.amount)} to ${name}`)
       setTimeout(() => setLogged(null), 2500)
